@@ -39,6 +39,7 @@
         'BRK.B': 'BRK-B',
         'BRK.A': 'BRK-A',
         'SPX': '^GSPC',
+        'WTI': 'CL=F',
     };
 
     // 加密货币代码 → Yahoo Finance 会自动加 -USD 后缀查询
