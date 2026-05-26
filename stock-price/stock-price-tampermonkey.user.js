@@ -29,7 +29,7 @@
         'take profit',
         'debit card',
         'credit card',
-        
+        'vice versa',
     ];
 
     // 别名映射 —— 论坛写法 → Yahoo Finance 实际代码
@@ -184,6 +184,7 @@
     }
 
     function isAcceptedCode(code) {
+        if (code.length < 2) return false;
         return code.length >= 3 || SHORT_CODE_WHITELIST.has(code)
             || SYMBOL_ALIASES[code] || FUTURES_CODES.has(code);
     }

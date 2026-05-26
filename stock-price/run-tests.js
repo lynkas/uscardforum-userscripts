@@ -92,6 +92,7 @@ function isTickerLike(word) {
 }
 
 function isAcceptedCode(code) {
+    if (code.length < 2) return false;
     return code.length >= 3 || SHORT_CODE_WHITELIST.has(code)
         || SYMBOL_ALIASES[code] || FUTURES_CODES.has(code);
 }
