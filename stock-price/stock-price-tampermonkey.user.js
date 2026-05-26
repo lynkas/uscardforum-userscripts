@@ -568,7 +568,7 @@
         const escaped = sorted.map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
         const pattern = escaped.join('|');
         return new RegExp(
-            `\\$(${pattern})(?![A-Za-z0-9])|(?<![A-Za-z$\\d'.])(${pattern})(?![A-Za-z\\d.])`,
+            `\\$(${pattern})(?![A-Za-z0-9])|(?<![A-Za-z$\\d'’‘])(${pattern})(?![A-Za-z\\d.])`,
             'gi'
         );
     }
