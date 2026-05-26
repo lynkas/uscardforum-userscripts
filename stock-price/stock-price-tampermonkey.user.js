@@ -30,6 +30,7 @@
         'debit card',
         'credit card',
         'vice versa',
+        'crude oil',
     ];
 
     // 别名映射 —— 论坛写法 → Yahoo Finance 实际代码
@@ -342,12 +343,15 @@
             const forex = collectForexPairs(group.text, group.offset);
             zones = zones.concat(dot.zones, forex.zones);
 
-            // Chinese paragraphs get extra skip zones
+            // Chinese paragraphs get grammar + phrase skip zones
+            // All types get phrase skip zones
             if (group.type === 'chinese') {
                 zones = zones.concat(
                     buildGrammarZones(group.text, group.offset),
                     buildPhraseZones(group.text, group.offset)
                 );
+            } else {
+                zones = zones.concat(buildPhraseZones(group.text, group.offset));
             }
 
             for (const c of dot.codes) standaloneCodes.add(c);
