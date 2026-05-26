@@ -18,7 +18,7 @@
     // ═══════════════════════════════════════════════════════════════════════
     const EXCLUDE_CODES = new Set([
         'IPO','PUT','CALL','G','ZS','B','WTF','CAPEX','TLDR','BUY',
-        'ARROW','YTD',
+        'ARROW','YTD','OIL',
         // 'AI', 'ON', 'A',  ← 示例，取消注释即可排除
     ]);
 
