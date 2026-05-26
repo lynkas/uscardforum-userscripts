@@ -1,6 +1,6 @@
-# USCardForum 油猴脚本合集
+# 我的 USCardForum 油猴脚本
 
-[USCardForum（美卡论坛）](https://www.uscardforum.com/) 的 Tampermonkey 用户脚本合集。
+给 [USCardForum（美卡论坛）](https://www.uscardforum.com/) 写的一些 Tampermonkey 小脚本。
 
 ## 安装
 
