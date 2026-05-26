@@ -53,7 +53,7 @@
 
     // 法币代码 → Yahoo Finance 用 CURRENCY=X 格式，显示为 1 USD 兑换价
     const FIAT_CODES = new Set([
-        'CNY', 'EUR', 'GBP', 'JPY', 'KRW', 'CAD', 'AUD', 'CHF', 'HKD',
+        'USD', 'CNY', 'EUR', 'GBP', 'JPY', 'KRW', 'CAD', 'AUD', 'CHF', 'HKD',
         'TWD', 'SGD', 'INR', 'MXN', 'BRL', 'THB', 'MYR', 'PHP', 'VND',
         'NZD', 'SEK', 'NOK', 'DKK', 'ZAR', 'RUB', 'TRY', 'PLN', 'CZK',
         'ILS', 'AED', 'SAR', 'CNH',
