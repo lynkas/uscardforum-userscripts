@@ -191,17 +191,18 @@ function buildGrammarZones(text, offset) {
 
 function buildPhraseZones(text, offset) {
     const zones = [];
-    const upper = text.toUpperCase();
     for (const phrase of EXCLUDE_PHRASES) {
-        const pUpper = phrase.toUpperCase();
-        let p = 0;
-        while ((p = upper.indexOf(pUpper, p)) !== -1) {
-            const before = p > 0 ? upper[p - 1] : ' ';
-            const after = upper[p + pUpper.length] || ' ';
+        const words = phrase.split(/\s+/);
+        const re = new RegExp(
+            words.map(w => w.toUpperCase()).join('\\s*'),
+            'g'
+        );
+        for (const m of text.toUpperCase().matchAll(re)) {
+            const before = m.index > 0 ? text.toUpperCase()[m.index - 1] : ' ';
+            const after = text.toUpperCase()[m.index + m[0].length] || ' ';
             if (!/[A-Z]/.test(before) && !/[A-Z]/.test(after)) {
-                zones.push([offset + p, offset + p + pUpper.length]);
+                zones.push([offset + m.index, offset + m.index + m[0].length]);
             }
-            p++;
         }
     }
     return zones;
