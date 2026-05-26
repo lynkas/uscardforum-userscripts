@@ -634,10 +634,21 @@
             const matches = [...text.matchAll(regex)];
             if (matches.length === 0) continue;
 
-            // Keep only matches with valid price data
+            // Keep only matches with valid price data and not in exclude phrases
             const validMatches = matches.filter(m => {
                 const symbol = (m[1] || m[2]).toUpperCase();
-                return priceMap.has(symbol);
+                if (!priceMap.has(symbol)) return false;
+                // Check if this match falls inside an exclude phrase
+                const upper = text.toUpperCase();
+                for (const phrase of EXCLUDE_PHRASES) {
+                    const pUpper = phrase.toUpperCase();
+                    let p = 0;
+                    while ((p = upper.indexOf(pUpper, p)) !== -1) {
+                        if (m.index >= p && m.index < p + pUpper.length) return false;
+                        p++;
+                    }
+                }
+                return true;
             });
             if (validMatches.length === 0) continue;
 
