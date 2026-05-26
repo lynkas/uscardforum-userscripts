@@ -30,7 +30,6 @@
         'debit card',
         'credit card',
         'vice versa',
-        'crude oil',
     ];
 
     // 别名映射 —— 论坛写法 → Yahoo Finance 实际代码
@@ -288,18 +287,17 @@
 
     function buildPhraseZones(text, offset) {
         const zones = [];
+        const upper = text.toUpperCase();
         for (const phrase of EXCLUDE_PHRASES) {
-            const words = phrase.split(/\s+/);
-            const re = new RegExp(
-                words.map(w => w.toUpperCase()).join('\\s*'),
-                'g'
-            );
-            for (const m of text.toUpperCase().matchAll(re)) {
-                const before = m.index > 0 ? text.toUpperCase()[m.index - 1] : ' ';
-                const after = text.toUpperCase()[m.index + m[0].length] || ' ';
+            const pUpper = phrase.toUpperCase();
+            let p = 0;
+            while ((p = upper.indexOf(pUpper, p)) !== -1) {
+                const before = p > 0 ? upper[p - 1] : ' ';
+                const after = upper[p + pUpper.length] || ' ';
                 if (!/[A-Z]/.test(before) && !/[A-Z]/.test(after)) {
-                    zones.push([offset + m.index, offset + m.index + m[0].length]);
+                    zones.push([offset + p, offset + p + pUpper.length]);
                 }
+                p++;
             }
         }
         return zones;
@@ -350,8 +348,6 @@
                     buildGrammarZones(group.text, group.offset),
                     buildPhraseZones(group.text, group.offset)
                 );
-            } else {
-                zones = zones.concat(buildPhraseZones(group.text, group.offset));
             }
 
             for (const c of dot.codes) standaloneCodes.add(c);
