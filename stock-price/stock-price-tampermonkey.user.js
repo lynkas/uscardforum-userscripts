@@ -30,6 +30,7 @@
         'debit card',
         'credit card',
         'vice versa',
+        'crude oil',
     ];
 
     // 别名映射 —— 论坛写法 → Yahoo Finance 实际代码
