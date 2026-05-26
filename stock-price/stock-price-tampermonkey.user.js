@@ -349,6 +349,8 @@
                     buildGrammarZones(group.text, group.offset),
                     buildPhraseZones(group.text, group.offset)
                 );
+            } else {
+                zones = zones.concat(buildPhraseZones(group.text, group.offset));
             }
 
             for (const c of dot.codes) standaloneCodes.add(c);
