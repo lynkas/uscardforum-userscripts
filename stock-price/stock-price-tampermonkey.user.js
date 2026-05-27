@@ -454,13 +454,16 @@
             }
         }
 
-        // Only fetch symbols not in cache
+        // Fetch sequentially with stagger to avoid rate limiting
         if (toFetch.length > 0) {
-            const results = await Promise.all(toFetch.map(s => fetchPrice(s)));
-            for (const result of results) {
+            for (let i = 0; i < toFetch.length; i++) {
+                const result = await fetchPrice(toFetch[i]);
                 if (result) {
                     priceMap.set(result.symbol, result);
-                    priceCache.set(result.symbol, { data: result, timestamp: now });
+                    priceCache.set(result.symbol, { data: result, timestamp: Date.now() });
+                }
+                if (i < toFetch.length - 1) {
+                    await new Promise(r => setTimeout(r, STAGGER_DELAY));
                 }
             }
         }
