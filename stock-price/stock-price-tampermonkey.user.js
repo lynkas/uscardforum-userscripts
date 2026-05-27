@@ -394,6 +394,11 @@
                 responseType: 'json',
                 timeout: 5000,
                 onload(response) {
+                    if (response.status === 429) {
+                        console.warn('[stock-price] rate limited (429) for', symbol);
+                        resolve(null);
+                        return;
+                    }
                     try {
                         const data = typeof response.response === 'string'
                             ? JSON.parse(response.response)
@@ -454,16 +459,13 @@
             }
         }
 
-        // Fetch sequentially with stagger to avoid rate limiting
+        // Fetch in batches to avoid rate limiting
         if (toFetch.length > 0) {
-            for (let i = 0; i < toFetch.length; i++) {
-                const result = await fetchPrice(toFetch[i]);
+            const results = await fetchBatch(toFetch);
+            for (const result of results) {
                 if (result) {
                     priceMap.set(result.symbol, result);
                     priceCache.set(result.symbol, { data: result, timestamp: Date.now() });
-                }
-                if (i < toFetch.length - 1) {
-                    await new Promise(r => setTimeout(r, STAGGER_DELAY));
                 }
             }
         }
@@ -838,7 +840,23 @@
     // ─── Periodic Price Refresh ────────────────────────────────────────────
 
     const REFRESH_INTERVAL = 60000; // 60 seconds per symbol
-    const STAGGER_DELAY = 3000; // 3 seconds between symbols
+    const STAGGER_DELAY = 3000; // 3 seconds between refresh symbols
+
+    // Rate-limited batch fetch: max 20 concurrent, batch every 5s
+    async function fetchBatch(symbols) {
+        const BATCH_SIZE = 20;
+        const BATCH_INTERVAL = 5000;
+        const results = [];
+        for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+            const batch = symbols.slice(i, i + BATCH_SIZE);
+            const batchResults = await Promise.all(batch.map(s => fetchPrice(s)));
+            results.push(...batchResults);
+            if (i + BATCH_SIZE < symbols.length) {
+                await new Promise(r => setTimeout(r, BATCH_INTERVAL));
+            }
+        }
+        return results;
+    }
     const lastRefresh = new Map(); // symbol → timestamp
 
     async function refreshPrices() {
