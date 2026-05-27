@@ -370,9 +370,7 @@
     const priceCache = new Map(); // symbol -> { data, timestamp }
     const CACHE_TTL = 60000; // 60 seconds
     const pendingFetches = new Set(); // symbols currently being fetched
-    let fetchQueue = Promise.resolve(); // serialize all fetches
     let lastRequestTime = 0;
-    const REQUEST_INTERVAL = 500; // ms between requests
     let requestCount = 0;
     let requestLog = []; // { time, symbol, status, duration, gap }
 
@@ -460,6 +458,9 @@
         });
     }
 
+    const BATCH_SIZE = 20;
+    const BATCH_INTERVAL = 5000;
+
     async function fetchPrices(symbols) {
         const priceMap = new Map();
         const toFetch = [];
@@ -478,25 +479,28 @@
 
         if (toFetch.length === 0) return priceMap;
 
-        // Chain onto the global queue so all fetches are serialized
-        fetchQueue = fetchQueue.then(async () => {
-            for (let i = 0; i < toFetch.length; i++) {
-                const symbol = toFetch[i];
-                pendingFetches.add(symbol);
-                const result = await fetchPrice(symbol);
-                pendingFetches.delete(symbol);
+        // Mark all as pending immediately to prevent duplicate requests
+        toFetch.forEach(s => pendingFetches.add(s));
+
+        // Fetch in batches of 20, with 5s between batches
+        for (let i = 0; i < toFetch.length; i += BATCH_SIZE) {
+            const batch = toFetch.slice(i, i + BATCH_SIZE);
+            console.log(`[stock-price] batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(toFetch.length / BATCH_SIZE)}: ${batch.join(', ')}`);
+            const results = await Promise.all(batch.map(s => fetchPrice(s)));
+            for (const result of results) {
                 if (result) {
                     priceMap.set(result.symbol, result);
                     priceCache.set(result.symbol, { data: result, timestamp: Date.now() });
                 }
-                // 500ms between requests to avoid rate limiting
-                if (i < toFetch.length - 1) {
-                    await new Promise(r => setTimeout(r, 500));
-                }
             }
-        });
+            // Remove from pending
+            batch.forEach(s => pendingFetches.delete(s));
+            if (i + BATCH_SIZE < toFetch.length) {
+                console.log(`[stock-price] waiting ${BATCH_INTERVAL}ms before next batch...`);
+                await new Promise(r => setTimeout(r, BATCH_INTERVAL));
+            }
+        }
 
-        await fetchQueue;
         return priceMap;
     }
 
@@ -924,23 +928,27 @@
             log('updated', spans.length, 'span(s) for', symbol);
         }
 
-        // Stagger requests, update DOM immediately after each fetch
-        for (const symbol of toRefresh) {
-            log('fetching:', symbol);
-            const result = await fetchPrice(symbol);
-            if (result) {
-                log('fetched:', symbol, result.price, result.change);
-                pagePriceMap.set(symbol, result);
-                priceCache.set(symbol, { data: result, timestamp: Date.now() });
-                updateSymbolSpans(symbol, result);
-            } else {
-                log('fetch failed, marking dead:', symbol);
-                deadSymbols.add(symbol);
-                pagePriceMap.delete(symbol);
+        // Fetch in batches of 20, update DOM after each batch
+        for (let i = 0; i < toRefresh.length; i += BATCH_SIZE) {
+            const batch = toRefresh.slice(i, i + BATCH_SIZE);
+            log('refresh batch:', batch.join(', '));
+            const results = await Promise.all(batch.map(s => fetchPrice(s)));
+            for (let j = 0; j < batch.length; j++) {
+                const symbol = batch[j];
+                const result = results[j];
+                lastRefresh.set(symbol, Date.now());
+                if (result) {
+                    pagePriceMap.set(symbol, result);
+                    priceCache.set(symbol, { data: result, timestamp: Date.now() });
+                    updateSymbolSpans(symbol, result);
+                } else {
+                    log('fetch failed, marking dead:', symbol);
+                    deadSymbols.add(symbol);
+                    pagePriceMap.delete(symbol);
+                }
             }
-            lastRefresh.set(symbol, Date.now());
-            if (toRefresh.indexOf(symbol) < toRefresh.length - 1) {
-                await new Promise(r => setTimeout(r, 500));
+            if (i + BATCH_SIZE < toRefresh.length) {
+                await new Promise(r => setTimeout(r, BATCH_INTERVAL));
             }
         }
 
