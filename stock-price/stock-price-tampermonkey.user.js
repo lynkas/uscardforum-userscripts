@@ -371,6 +371,10 @@
     const CACHE_TTL = 60000; // 60 seconds
     const pendingFetches = new Set(); // symbols currently being fetched
     let fetchQueue = Promise.resolve(); // serialize all fetches
+    let lastRequestTime = 0;
+    const REQUEST_INTERVAL = 500; // ms between requests
+    let requestCount = 0;
+    let requestLog = []; // { time, symbol, status, duration, gap }
 
     function fetchPrice(symbol) {
         return new Promise((resolve) => {
@@ -390,17 +394,27 @@
                 yahooSymbol = resolved;
             }
             console.log('[stock-price] request:', symbol);
+            const startTime = Date.now();
             GM_xmlhttpRequest({
                 method: 'GET',
                 url: `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=1d&interval=1d&includePrePost=true`,
                 responseType: 'json',
                 timeout: 5000,
                 onload(response) {
+                    const duration = Date.now() - startTime;
+                    const gap = startTime - lastRequestTime;
+                    lastRequestTime = startTime;
+                    requestCount++;
+                    const entry = { time: new Date().toISOString(), symbol, status: response.status, duration, gap, queueLen: pendingFetches.size };
+                    requestLog.push(entry);
+                    if (requestLog.length > 200) requestLog.shift();
+
                     if (response.status === 429) {
-                        console.warn('[stock-price] rate limited (429) for', symbol);
+                        console.warn(`[stock-price] ⚠️ 429 RATE LIMITED ${symbol} (gap=${gap}ms, duration=${duration}ms, queue=${pendingFetches.size})`);
                         resolve(null);
                         return;
                     }
+                    console.log(`[stock-price] ✓ ${symbol} ${response.status} ${duration}ms (gap=${gap}ms, queue=${pendingFetches.size}, total=#${requestCount})`);
                     try {
                         const data = typeof response.response === 'string'
                             ? JSON.parse(response.response)
@@ -935,6 +949,35 @@
 
     refreshTimer = setInterval(refreshPrices, 60000);
     log('refresh timer set, interval 60s');
+
+    // Expose debug helpers on window
+    window.__stockPriceDebug = {
+        getLog() {
+            return requestLog;
+        },
+        stats() {
+            const total = requestLog.length;
+            if (total === 0) return 'No requests yet';
+            const byStatus = {};
+            let minGap = Infinity, maxGap = 0, sumGap = 0, gaps = [];
+            for (const e of requestLog) {
+                byStatus[e.status] = (byStatus[e.status] || 0) + 1;
+                if (e.gap > 0) { gaps.push(e.gap); sumGap += e.gap; }
+            }
+            if (gaps.length) { minGap = Math.min(...gaps); maxGap = Math.max(...gaps); }
+            const avgGap = gaps.length ? Math.round(sumGap / gaps.length) : 0;
+            const rateLimited = requestLog.filter(e => e.status === 429).length;
+            return `Total: ${total}, Rate limited: ${rateLimited}, Avg gap: ${avgGap}ms, Min gap: ${minGap}ms, Max gap: ${maxGap}ms, Status: ${JSON.stringify(byStatus)}`;
+        },
+        recent(n = 20) {
+            return requestLog.slice(-n);
+        },
+        symbols() {
+            return { pagePriceMap: [...pagePriceMap.keys()], deadSymbols: [...deadSymbols], pending: [...pendingFetches] };
+        }
+    };
+    console.log('[stock-price] Debug: use __stockPriceDebug.stats(), .recent(), .symbols(), .getLog()');
+
     initialized = true;
 
     } // end of init()
