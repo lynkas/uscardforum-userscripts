@@ -55,7 +55,7 @@
     const FIAT_CODES = new Set([
         'USD', 'CNY', 'EUR', 'GBP', 'JPY', 'KRW', 'CAD', 'AUD', 'CHF', 'HKD',
         'TWD', 'SGD', 'INR', 'MXN', 'BRL', 'THB', 'MYR', 'PHP', 'VND',
-        'NZD', 'SEK', 'NOK', 'DKK', 'ZAR', 'RUB', 'TRY', 'PLN', 'CZK',
+        'NZD', 'SEK', 'DKK', 'ZAR', 'RUB', 'TRY', 'PLN', 'CZK',
         'ILS', 'AED', 'SAR', 'CNH',
     ]);
 
