@@ -461,7 +461,7 @@
     const BATCH_SIZE = 20;
     const BATCH_INTERVAL = 5000;
 
-    async function fetchPrices(symbols) {
+    async function fetchPrices(symbols, onBatch) {
         const priceMap = new Map();
         const toFetch = [];
         const now = Date.now();
@@ -477,7 +477,10 @@
             }
         }
 
-        if (toFetch.length === 0) return priceMap;
+        if (toFetch.length === 0) {
+            if (onBatch && priceMap.size > 0) onBatch(priceMap);
+            return priceMap;
+        }
 
         // Mark all as pending immediately to prevent duplicate requests
         toFetch.forEach(s => pendingFetches.add(s));
@@ -495,6 +498,8 @@
             }
             // Remove from pending
             batch.forEach(s => pendingFetches.delete(s));
+            // Notify caller after each batch so DOM can update progressively
+            if (onBatch && priceMap.size > 0) onBatch(priceMap);
             if (i + BATCH_SIZE < toFetch.length) {
                 console.log(`[stock-price] waiting ${BATCH_INTERVAL}ms before next batch...`);
                 await new Promise(r => setTimeout(r, BATCH_INTERVAL));
@@ -824,24 +829,24 @@
 
         if (allCodes.size === 0) return;
 
-        // Fetch only unknown codes
+        // Fetch only unknown codes, update DOM progressively after each batch
         const codesToFetch = [...allCodes];
-        fetchPrices(codesToFetch).then(freshMap => {
+        fetchPrices(codesToFetch, (batchMap) => {
+            // Merge batch results into page-level map
+            for (const [symbol, data] of batchMap) {
+                pagePriceMap.set(symbol, data);
+            }
+            // Update all new containers with currently available data
+            for (const { el, isTitle } of newContainers) {
+                replaceInContainer(el, pagePriceMap, isTitle);
+            }
+        }).then(freshMap => {
             // Mark codes that returned no data as dead
             for (const code of codesToFetch) {
                 if (!freshMap.has(code)) {
                     deadSymbols.add(code);
                     log('processNewPosts: marking dead', code);
                 }
-            }
-            if (freshMap.size === 0) return;
-            // Merge into page-level map
-            for (const [symbol, data] of freshMap) {
-                pagePriceMap.set(symbol, data);
-            }
-            // Replace in all new containers with combined data
-            for (const { el, isTitle } of newContainers) {
-                replaceInContainer(el, pagePriceMap, isTitle);
             }
         });
     }
