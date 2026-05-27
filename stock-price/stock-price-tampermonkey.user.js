@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USCardForum Stock Price
 // @namespace    http://tampermonkey.net/
-// @version      0.2
+// @version      0.3
 // @description  Show stock prices inline on USCardForum investment category
 // @match        https://www.uscardforum.com/*
 // @grant        GM_xmlhttpRequest
@@ -839,6 +839,10 @@
             // Update all new containers with currently available data
             for (const { el, isTitle } of newContainers) {
                 replaceInContainer(el, pagePriceMap, isTitle);
+                // Mark as processed once content is replaced
+                if (el.querySelector('.sp-stock-link, .sp-stock-title')) {
+                    processedPosts.add(el);
+                }
             }
         }).then(freshMap => {
             // Mark codes that returned no data as dead
@@ -847,6 +851,10 @@
                     deadSymbols.add(code);
                     log('processNewPosts: marking dead', code);
                 }
+            }
+            // Final pass: mark all processed
+            for (const { el, isTitle } of newContainers) {
+                processedPosts.add(el);
             }
         });
     }
