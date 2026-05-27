@@ -836,10 +836,13 @@
             for (const [symbol, data] of batchMap) {
                 pagePriceMap.set(symbol, data);
             }
-            // Update all new containers with currently available data
+            // Update captured containers (may be detached if Discourse re-rendered)
             for (const { el, isTitle } of newContainers) {
                 replaceInContainer(el, pagePriceMap, isTitle);
             }
+            // Re-scan live DOM — Discourse may have replaced .cooked elements
+            // between extraction and fetch completion (bottom-to-top scrolling)
+            processNewPosts();
         }).then(freshMap => {
             // Mark codes that returned no data as dead
             for (const code of codesToFetch) {
