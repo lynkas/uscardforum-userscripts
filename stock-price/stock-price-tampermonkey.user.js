@@ -369,6 +369,8 @@
 
     const priceCache = new Map(); // symbol -> { data, timestamp }
     const CACHE_TTL = 60000; // 60 seconds
+    const pendingFetches = new Set(); // symbols currently being fetched
+    let fetchQueue = Promise.resolve(); // serialize all fetches
 
     function fetchPrice(symbol) {
         return new Promise((resolve) => {
@@ -449,8 +451,9 @@
         const toFetch = [];
         const now = Date.now();
 
-        // Check cache for each symbol
+        // Check cache for each symbol, skip pending
         for (const symbol of symbols) {
+            if (pendingFetches.has(symbol)) continue;
             const cached = priceCache.get(symbol);
             if (cached && (now - cached.timestamp) < CACHE_TTL) {
                 priceMap.set(symbol, cached.data);
@@ -459,17 +462,27 @@
             }
         }
 
-        // Fetch in batches to avoid rate limiting
-        if (toFetch.length > 0) {
-            const results = await fetchBatch(toFetch);
-            for (const result of results) {
+        if (toFetch.length === 0) return priceMap;
+
+        // Chain onto the global queue so all fetches are serialized
+        fetchQueue = fetchQueue.then(async () => {
+            for (let i = 0; i < toFetch.length; i++) {
+                const symbol = toFetch[i];
+                pendingFetches.add(symbol);
+                const result = await fetchPrice(symbol);
+                pendingFetches.delete(symbol);
                 if (result) {
                     priceMap.set(result.symbol, result);
                     priceCache.set(result.symbol, { data: result, timestamp: Date.now() });
                 }
+                // 500ms between requests to avoid rate limiting
+                if (i < toFetch.length - 1) {
+                    await new Promise(r => setTimeout(r, 500));
+                }
             }
-        }
+        });
 
+        await fetchQueue;
         return priceMap;
     }
 
@@ -770,7 +783,7 @@
             cleanEl.querySelectorAll('aside').forEach(a => a.remove());
             for (const code of extractStockCodes(cleanEl)) {
                 recentlySeen.set(code, now);
-                if (!pagePriceMap.has(code) && !deadSymbols.has(code)) {
+                if (!pagePriceMap.has(code) && !deadSymbols.has(code) && !pendingFetches.has(code)) {
                     allCodes.add(code);
                 }
             }
@@ -840,23 +853,7 @@
     // ─── Periodic Price Refresh ────────────────────────────────────────────
 
     const REFRESH_INTERVAL = 60000; // 60 seconds per symbol
-    const STAGGER_DELAY = 3000; // 3 seconds between refresh symbols
 
-    // Rate-limited batch fetch: max 20 concurrent, batch every 5s
-    async function fetchBatch(symbols) {
-        const BATCH_SIZE = 20;
-        const BATCH_INTERVAL = 5000;
-        const results = [];
-        for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
-            const batch = symbols.slice(i, i + BATCH_SIZE);
-            const batchResults = await Promise.all(batch.map(s => fetchPrice(s)));
-            results.push(...batchResults);
-            if (i + BATCH_SIZE < symbols.length) {
-                await new Promise(r => setTimeout(r, BATCH_INTERVAL));
-            }
-        }
-        return results;
-    }
     const lastRefresh = new Map(); // symbol → timestamp
 
     async function refreshPrices() {
@@ -929,7 +926,7 @@
             }
             lastRefresh.set(symbol, Date.now());
             if (toRefresh.indexOf(symbol) < toRefresh.length - 1) {
-                await new Promise(r => setTimeout(r, STAGGER_DELAY));
+                await new Promise(r => setTimeout(r, 500));
             }
         }
 
