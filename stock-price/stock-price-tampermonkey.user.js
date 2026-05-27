@@ -18,7 +18,7 @@
     // ═══════════════════════════════════════════════════════════════════════
     const EXCLUDE_CODES = new Set([
         'IPO','PUT','CALL','G','ZS','B','WTF','CAPEX','TLDR','BUY',
-        'ARROW','YTD','OIL','YEAR','BEAT','HOLD','TACO','OPUS','GPT','PAY','FLAT','GAIN','LEAD','IRS','EST','ROTH',
+        'ARROW','YTD','OIL','YEAR','BEAT','HOLD','TACO','OPUS','GPT','PAY','FLAT','GAIN','LEAD','IRS','EST','ROTH','LOW','FILL',
         // 'AI', 'ON', 'A',  ← 示例，取消注释即可排除
     ]);
 
