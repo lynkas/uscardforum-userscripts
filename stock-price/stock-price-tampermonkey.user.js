@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USCardForum Stock Price
 // @namespace    http://tampermonkey.net/
-// @version      0.2
+// @version      0.3
 // @description  Show stock prices inline on USCardForum investment category
 // @match        https://www.uscardforum.com/*
 // @grant        GM_xmlhttpRequest
@@ -172,6 +172,7 @@
         if (/[^\x00-\x7F]/.test(para)) return 'chinese';
         const words = [...para.matchAll(/[A-Za-z']+/g)].map(m => m[0].toUpperCase());
         if (words.some(w => GRAMMAR_WORDS.has(w))) return 'prose';
+        if (words.length > 10) return 'prose';
         return 'codelist';
     }
 
@@ -330,7 +331,6 @@
         for (const group of groupParagraphs(text)) {
             if (group.type === 'prose') continue; // prose: only $EXACT
 
-            // Code-list groups need at least one ticker-like word
             if (group.type === 'codelist') {
                 const words = [...group.text.matchAll(/[A-Za-z]+/g)].map(m => m[0]);
                 if (!words.some(isTickerLike)) continue;

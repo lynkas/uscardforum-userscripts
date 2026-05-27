@@ -78,6 +78,7 @@ function classifyParagraph(para) {
     if (/[^\x00-\x7F]/.test(para)) return 'chinese';
     const words = [...para.matchAll(/[A-Za-z']+/g)].map(m => m[0].toUpperCase());
     if (words.some(w => GRAMMAR_WORDS.has(w))) return 'prose';
+    if (words.length > 10) return 'prose';
     return 'codelist';
 }
 
