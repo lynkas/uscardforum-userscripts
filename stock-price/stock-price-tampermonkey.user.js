@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USCardForum Stock Price
 // @namespace    http://tampermonkey.net/
-// @version      0.3
+// @version      0.3.1
 // @description  Show stock prices inline on USCardForum investment category
 // @match        https://www.uscardforum.com/*
 // @grant        GM_xmlhttpRequest
@@ -18,7 +18,7 @@
     // ═══════════════════════════════════════════════════════════════════════
     const EXCLUDE_CODES = new Set([
         'IPO','PUT','CALL','G','ZS','B','WTF','CAPEX','TLDR','BUY',
-        'ARROW','YTD','OIL','YEAR',
+        'ARROW','YTD','OIL','YEAR','BEAT','HOLD','TACO','OPUS','GPT','PAY','FLAT','GAIN','LEAD','IRS','EST','ROTH',
         // 'AI', 'ON', 'A',  ← 示例，取消注释即可排除
     ]);
 
@@ -31,6 +31,8 @@
         'credit card',
         'vice versa',
         'crude oil',
+        'long term',
+        'short term',
     ];
 
     // 别名映射 —— 论坛写法 → Yahoo Finance 实际代码
