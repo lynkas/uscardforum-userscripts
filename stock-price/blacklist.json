@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "excludeCodes": [
+    "IPO", "PUT", "CALL", "G", "ZS", "B", "WTF", "CAPEX", "TLDR", "BUY",
+    "ARROW", "YTD", "OIL", "YEAR", "BEAT", "HOLD", "TACO", "OPUS", "GPT", "PAY",
+    "FLAT", "GAIN", "LEAD", "IRS", "EST", "ROTH", "LOW", "FILL",
+    "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+    "PDT", "INDEX", "APP"
+  ],
+  "excludePhrases": [
+    "cost basis",
+    "stop loss",
+    "take profit",
+    "debit card",
+    "credit card",
+    "vice versa",
+    "crude oil",
+    "long term",
+    "short term",
+    "negative cor",
+    "positive cor"
+  ],
+  "aliases": {
+    "BRKB": "BRK-B",
+    "BRKA": "BRK-A",
+    "BRK.B": "BRK-B",
+    "BRK.A": "BRK-A",
+    "SPX": "^GSPC",
+    "WTI": "CL=F"
+  }
+}

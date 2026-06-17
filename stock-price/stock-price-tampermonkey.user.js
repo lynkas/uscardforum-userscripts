@@ -1,12 +1,17 @@
 // ==UserScript==
 // @name         USCardForum Stock Price
 // @namespace    http://tampermonkey.net/
-// @version      0.3.2
+// @version      0.4.0
 // @description  Show stock prices inline on USCardForum investment category
 // @match        https://www.uscardforum.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_registerMenuCommand
 // @connect      query1.finance.yahoo.com
+// @connect      raw.githubusercontent.com
+// @connect      gist.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -77,6 +82,151 @@
     ]);
     // ═══════════════════════════════════════════════════════════════════════
 
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Remote blacklist — default uses repo JSON, user can swap to their gist
+    // ═══════════════════════════════════════════════════════════════════════
+    const DEFAULT_BLACKLIST_URL =
+        'https://raw.githubusercontent.com/lynkas/uscardforum-userscripts/main/stock-price/blacklist.json';
+    const GMK_URL = 'sp_blacklist_url';
+    const GMK_CACHE = 'sp_blacklist_cache';
+
+    // Baseline snapshot (hardcoded floor — fallback when remote is unreachable)
+    const _FLOOR = {
+        excludeCodes: new Set(EXCLUDE_CODES),
+        excludePhrases: [...EXCLUDE_PHRASES],
+        aliases: { ...SYMBOL_ALIASES },
+    };
+
+    function applyRemoteData(data) {
+        // 1) Reset to floor (so re-sync reflects deletions from remote)
+        EXCLUDE_CODES.clear();
+        _FLOOR.excludeCodes.forEach(c => EXCLUDE_CODES.add(c));
+        EXCLUDE_PHRASES.length = 0;
+        EXCLUDE_PHRASES.push(..._FLOOR.excludePhrases);
+        for (const k of Object.keys(SYMBOL_ALIASES)) delete SYMBOL_ALIASES[k];
+        Object.assign(SYMBOL_ALIASES, _FLOOR.aliases);
+
+        // 2) Per-field override from remote (field present → replace; absent → keep floor)
+        if (!data || typeof data !== 'object') return;
+        if (Array.isArray(data.excludeCodes)) {
+            EXCLUDE_CODES.clear();
+            data.excludeCodes.forEach(c => {
+                if (typeof c === 'string') EXCLUDE_CODES.add(c.toUpperCase());
+            });
+        }
+        if (Array.isArray(data.excludePhrases)) {
+            EXCLUDE_PHRASES.length = 0;
+            data.excludePhrases.forEach(p => {
+                if (typeof p === 'string') EXCLUDE_PHRASES.push(p);
+            });
+        }
+        if (data.aliases && typeof data.aliases === 'object' && !Array.isArray(data.aliases)) {
+            for (const k of Object.keys(SYMBOL_ALIASES)) delete SYMBOL_ALIASES[k];
+            for (const [k, v] of Object.entries(data.aliases)) {
+                if (typeof v === 'string') SYMBOL_ALIASES[String(k).toUpperCase()] = v;
+            }
+        }
+    }
+
+    function getBlacklistUrl() {
+        return GM_getValue(GMK_URL, DEFAULT_BLACKLIST_URL);
+    }
+
+    async function loadRemoteBlacklist(force) {
+        const url = getBlacklistUrl();
+        if (!url) return { ok: false, msg: '未配置 URL' };
+
+        try {
+            const resp = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url,
+                    timeout: 8000,
+                    onload: resolve,
+                    onerror: () => reject(new Error('网络错误')),
+                    ontimeout: () => reject(new Error('请求超时')),
+                    onabort: () => reject(new Error('请求中止')),
+                });
+            });
+            if (resp.status < 200 || resp.status >= 300) throw new Error('HTTP ' + resp.status);
+            const data = JSON.parse(resp.responseText);
+            if (typeof data !== 'object' || data === null || Array.isArray(data))
+                throw new Error('JSON 不是对象');
+
+            GM_setValue(GMK_CACHE, data);
+            applyRemoteData(data);
+            console.log('[stock-price] 远程黑名单已加载:', {
+                codes: (data.excludeCodes || []).length,
+                phrases: (data.excludePhrases || []).length,
+                aliases: Object.keys(data.aliases || {}).length,
+            });
+            return {
+                ok: true,
+                counts: {
+                    codes: (data.excludeCodes || []).length,
+                    phrases: (data.excludePhrases || []).length,
+                    aliases: Object.keys(data.aliases || {}).length,
+                },
+            };
+        } catch (e) {
+            return { ok: false, msg: e.message };
+        }
+    }
+
+    const RE_URL = /^https:\/\/(raw\.githubusercontent\.com|gist\.githubusercontent\.com)\/.+/i;
+
+    GM_registerMenuCommand('⚙️ 设置黑名单同步链接…', () => {
+        const cur = getBlacklistUrl();
+        const input = prompt(
+            '黑名单 JSON 的 raw 链接：\n\n' +
+            '支持 raw.githubusercontent.com 或 gist.githubusercontent.com\n' +
+            '（不要用 gist.github.com 网页链接）\n\n' +
+            '留空恢复默认。',
+            cur
+        );
+        if (input === null) return;
+        const trimmed = input.trim();
+        if (trimmed === '') {
+        GM_setValue(GMK_URL, DEFAULT_BLACKLIST_URL);
+        alert('已恢复默认链接，正在同步…');
+            loadRemoteBlacklist(true).then(function (r) {
+                alert(r.ok ? '✓ 同步成功\n代码 ' + r.counts.codes + ' / 短语 ' + r.counts.phrases + ' / 别名 ' + r.counts.aliases + '\n\n刷新页面后对新帖生效'
+                           : '✗ 同步失败: ' + r.msg + '\n（已保留旧缓存）');
+            });
+            return;
+        }
+        if (!RE_URL.test(trimmed)) {
+            alert('✗ 链接格式不对\n需要 https://raw.githubusercontent.com/... 或 https://gist.githubusercontent.com/...');
+            return;
+        }
+        GM_setValue(GMK_URL, trimmed);
+        loadRemoteBlacklist(true).then(function (r) {
+            alert(r.ok ? '✓ 同步成功\n代码 ' + r.counts.codes + ' / 短语 ' + r.counts.phrases + ' / 别名 ' + r.counts.aliases + '\n\n刷新页面后对新帖生效'
+                       : '✗ 同步失败: ' + r.msg + '\n（已保留旧缓存）');
+        });
+    });
+
+    GM_registerMenuCommand('🔄 立即重新同步黑名单', () => {
+        loadRemoteBlacklist(true).then(function (r) {
+            alert(r.ok ? '✓ 同步成功\n代码 ' + r.counts.codes + ' / 短语 ' + r.counts.phrases + ' / 别名 ' + r.counts.aliases + '\n\n刷新页面后对新帖生效'
+                       : '✗ 同步失败: ' + r.msg + '\n（已保留旧缓存）');
+        });
+    });
+
+    GM_registerMenuCommand('📋 查看当前生效黑名单', () => {
+        const url = getBlacklistUrl();
+        const cached = GM_getValue(GMK_CACHE, null);
+        console.group('[stock-price] 当前黑名单');
+        console.log('URL:', url);
+        console.log('缓存来源:', cached ? '远程' : '脚本内地板（未拉到远程）');
+        console.log('excludeCodes:', [...EXCLUDE_CODES]);
+        console.log('excludePhrases:', [...EXCLUDE_PHRASES]);
+        console.log('aliases:', { ...SYMBOL_ALIASES });
+        console.groupEnd();
+        alert('已打印到控制台 (F12)\nURL: ' + url + '\n来源: ' + (cached ? '远程缓存' : '地板'));
+    });
+
     // ─── Task 1: Page Detection ───────────────────────────────────────────
 
     function isInvestmentCategory() {
@@ -124,6 +274,11 @@
             return;
         }
         if (initialized) return;
+
+    // ── Remote blacklist: apply cached data synchronously, fetch async if empty ──
+    const _cached = GM_getValue(GMK_CACHE, null);
+    if (_cached) applyRemoteData(_cached);
+    else loadRemoteBlacklist(false);
 
     // ─── Task 2: Stock Code Extraction ────────────────────────────────────
 
