@@ -190,8 +190,7 @@
         const url = getBlacklistUrl();
         if (r.ok) {
             resetNotifyForUrl(url);   // success → reset this URL's failure count
-            if (isManual) showToast(_syncSuccessMsg(r), 'success');
-            // auto success: silent (normal flow)
+            showToast(_syncSuccessMsg(r), 'success', isManual ? 5000 : 3000);
             return;
         }
         if (isManual) {
