@@ -170,6 +170,18 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    name: '颜文字中的单字母不提取 — O被ㄒ包围',
+    input: 'ㄒOㄒ',
+    expected: [],
+});
+
+extractionTests.push({
+    name: '颜文字中的单字母不提取 — B被包围',
+    input: 'ㄒBㄒ',
+    expected: [],
+});
+
+extractionTests.push({
     name: '$EXACT .INX 点号开头',
     input: '$.INX $.SPX $.DJI',
     expected: ['.INX', '.SPX', '.DJI'],
@@ -1231,9 +1243,9 @@ isTickerLikeTests.push({
 });
 
 isTickerLikeTests.push({
-    name: '白名单单字母 → true',
+    name: '单字母不在白名单 → false',
     input: 'C',
-    expected: true,
+    expected: false,
 });
 
 isTickerLikeTests.push({
@@ -1280,9 +1292,9 @@ isAcceptedCodeTests.push({
 });
 
 isAcceptedCodeTests.push({
-    name: '白名单单字母 → true',
+    name: '单字母不在白名单 → false',
     input: 'C',
-    expected: true,
+    expected: false,
 });
 
 isAcceptedCodeTests.push({

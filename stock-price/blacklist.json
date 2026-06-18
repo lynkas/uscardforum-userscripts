@@ -86,8 +86,6 @@
   // 默认排除规则会跳过 1-2 字母词，这里放行已确认是上市公司的。
   // (AI 已移到 excludeCodes，故从白名单删除)
   "shortCodeWhitelist": [
-    "B", "C", "F", "G", "H", "K", "L", "O", "P", "Q", "R",
-    "S", "T", "U", "V", "W", "X", "Y", "Z",
     "AA", "AM", "BA", "BR", "CA", "CI", "CV", "CW", "DE", "DU",
     "EM", "FC", "FL", "GE", "GM", "GS", "HP", "IQ",
     "JO", "KC", "KO", "LI", "MA", "MC", "MR", "MU", "NU", "NV",

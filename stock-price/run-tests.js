@@ -208,7 +208,7 @@ function extractStockCodes(container) {
         if (group.type === 'prose') continue;
 
         if (group.type === 'codelist') {
-            const words = [...group.text.matchAll(/[A-Za-z]+/g)].map(m => m[0]);
+            const words = [...group.text.matchAll(/[A-Za-z0-9.]+/g)].map(m => m[0]);
             if (!words.some(isTickerLike)) continue;
         }
 
