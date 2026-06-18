@@ -182,6 +182,12 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    name: 'WELL DTE 被 excludeCodes 排除',
+    input: 'well dte',
+    expected: [],
+});
+
+extractionTests.push({
     name: '颜文字中的单字母不提取 — O被ㄒ包围',
     input: 'ㄒOㄒ',
     expected: [],
