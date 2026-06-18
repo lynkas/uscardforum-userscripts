@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USCardForum Stock Price
 // @namespace    http://tampermonkey.net/
-// @version      4.0
+// @version      4.0.1
 // @description  Show stock prices inline on USCardForum investment category
 // @match        https://www.uscardforum.com/*
 // @grant        GM_xmlhttpRequest
@@ -106,6 +106,7 @@
     }
 
     function showToast(msg, type, duration, opts) {
+        console.log('[stock-price] showToast called: type=' + (type || 'info') + ', msg=' + (msg || '').slice(0, 40));
         type = type || 'info';
         duration = duration || 5000;
         opts = opts || null;
@@ -207,7 +208,7 @@
         'https://raw.githubusercontent.com/lynkas/uscardforum-userscripts/main/stock-price/blacklist.json';
     const GMK_URL = 'sp_blacklist_url';
     const GMK_CACHE = 'sp_blacklist_cache';
-    const SCRIPT_VERSION = '4.0';   // bump together with @version to force one-time blacklist refetch
+    const SCRIPT_VERSION = '4.0.1';   // bump together with @version to force one-time blacklist refetch
     const GMK_VER = 'sp_last_script_ver';
 
     // Populate all config constants from remote data (single source = blacklist.json).
@@ -417,14 +418,19 @@
     const _cached = GM_getValue(GMK_CACHE, null);
     const _lastVer = GM_getValue(GMK_VER, '');
     const _versionChanged = _lastVer !== SCRIPT_VERSION;
+    console.log('[stock-price] init blacklist: cached=' + (_cached ? 'YES' : 'NO') + ', lastVer="' + _lastVer + '", versionChanged=' + _versionChanged);
     if (_cached) applyRemoteData(_cached);
     const _needFetch = _versionChanged || !_cached;
     if (_versionChanged) GM_setValue(GMK_VER, SCRIPT_VERSION);
     if (_needFetch) {
+        console.log('[stock-price] init: calling loadRemoteBlacklist (force=' + _versionChanged + ')');
         loadRemoteBlacklist(_versionChanged).then(function (r) {
+            console.log('[stock-price] init: loadRemoteBlacklist resolved, r=', JSON.stringify(r));
             onSyncResult(r, false);
             processNewPosts();   // first scan now that blacklist is populated
         });
+    } else {
+        console.log('[stock-price] init: no fetch needed, using cache');
     }
 
     // ─── Task 2: Stock Code Extraction ────────────────────────────────────

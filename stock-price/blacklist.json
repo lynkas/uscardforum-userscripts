@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
 
   // ── excludeCodes: 看起来像股票代码但不该匹配的词 ──
   // 包含：交易术语(BUY/HOLD)、月份缩写(JAN-DEC)、财经缩写(YTD/IRS/ROTH)、
@@ -14,7 +14,8 @@
     "ALL", "ARE", "FOR", "HAS", "NOW", "RUN", "MAN", "WAY", "CAN", "OUT",
     "GOOD", "HERE", "HELP", "YOU", "AI",
     "NICE", "IT", "MARK", "PLAY", "PM", "CTO", "ET", "EVEN",
-    "HIGH"
+    "HIGH",
+    "SELL", "LOWER"
   ],
 
   // ── excludePhrases: 这些短语中的词不会被单独匹配为股票代码 ──
