@@ -10,6 +10,7 @@
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
 // @connect      query1.finance.yahoo.com
+// @connect      raw.githubusercontent.com
 // @connect      *
 // @run-at       document-idle
 // ==/UserScript==
