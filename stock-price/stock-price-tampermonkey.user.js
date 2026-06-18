@@ -413,6 +413,7 @@
     }
 
     function init() {
+        console.log('[stock-price] init(), isInvestmentCategory:', isInvestmentCategory());
         if (!isInvestmentCategory()) {
             if (initialized) stop();
             return;
@@ -1141,9 +1142,7 @@
 
     // ─── Task 6: MutationObserver ─────────────────────────────────────────
 
-    // Scan immediately only if blacklist is already populated; otherwise the
-    // remote-fetch .then() above will trigger the first scan once it arrives.
-    if (_cached) processNewPosts();
+    processNewPosts();
 
     let pendingUpdate = false;
     observer = new MutationObserver(() => {
