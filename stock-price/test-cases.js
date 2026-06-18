@@ -116,6 +116,12 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    name: '2字母白名单代码 CW',
+    input: 'HON(229.01 +0.17%) HWM(277.66 -1.97%) CW ATRO(80.56 +0.62%)',
+    expected: ['ATRO', 'CW', 'HON', 'HWM'],
+});
+
+extractionTests.push({
     name: '期货短代码加入白名单后独立匹配',
     input: 'NQ ES',
     expected: ['NQ', 'ES'],

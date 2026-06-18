@@ -88,7 +88,7 @@
   "shortCodeWhitelist": [
     "B", "C", "F", "G", "H", "K", "L", "O", "P", "Q", "R",
     "S", "T", "U", "V", "W", "X", "Y", "Z",
-    "AA", "AM", "BA", "BR", "CA", "CI", "CV", "DE", "DU",
+    "AA", "AM", "BA", "BR", "CA", "CI", "CV", "CW", "DE", "DU",
     "EM", "FC", "FL", "GE", "GM", "GS", "HP", "IQ",
     "JO", "KC", "KO", "LI", "MA", "MC", "MR", "MU", "NU", "NV",
     "PG", "PL", "QQ", "SQ", "ST", "TM", "UB", "UI",
