@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USCardForum Stock Price
 // @namespace    http://tampermonkey.net/
-// @version      0.4.0
+// @version      0.4.1
 // @description  Show stock prices inline on USCardForum investment category
 // @match        https://www.uscardforum.com/*
 // @grant        GM_xmlhttpRequest
@@ -207,7 +207,7 @@
         'https://raw.githubusercontent.com/lynkas/uscardforum-userscripts/main/stock-price/blacklist.json';
     const GMK_URL = 'sp_blacklist_url';
     const GMK_CACHE = 'sp_blacklist_cache';
-    const SCRIPT_VERSION = '0.4.0';   // bump together with @version to force one-time blacklist refetch
+    const SCRIPT_VERSION = '0.4.1';   // bump together with @version to force one-time blacklist refetch
     const GMK_VER = 'sp_last_script_ver';
 
     // Populate all config constants from remote data (single source = blacklist.json).
