@@ -10,57 +10,26 @@ const scriptSrc = fs.readFileSync(
     'utf8'
 );
 
-// ── Extract config blocks from script source ───────────────────────────────
-function extractSet(src, varName) {
-    const re = new RegExp(`${varName}\\s*=\\s*new Set\\(\\s*\\[([^\\]]*)\\]\\s*\\)`, 's');
-    const m = src.match(re);
-    if (!m) throw new Error(`Cannot find ${varName} in script`);
-    const items = m[1]
-        .split(',')
-        .map(s => s.replace(/\/\/.*/, '').trim().replace(/^['"]|['"]$/g, ''))
-        .filter(s => s && !s.startsWith('//'));
-    return new Set(items);
+// ── Load config from blacklist.json (JSONC — strip comments) ──────────────
+function stripJsonc(text) {
+    return text
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/(^|[^:])\/\/.*$/gm, '$1')
+        .replace(/,\s*([}\]])/g, '$1');
 }
+const configRaw = fs.readFileSync(path.join(__dirname, 'blacklist.json'), 'utf8');
+const CONFIG = JSON.parse(stripJsonc(configRaw));
 
-function extractArray(src, varName) {
-    const re = new RegExp(`${varName}\\s*=\\s*\\[([^\\]]*)\\]`, 's');
-    const m = src.match(re);
-    if (!m) throw new Error(`Cannot find ${varName} in script`);
-    const items = m[1]
-        .split(',')
-        .map(s => s.trim().replace(/^['"]|['"]$/g, ''))
-        .filter(Boolean);
-    return items;
-}
+const EXCLUDE_CODES = new Set(CONFIG.excludeCodes);
+const EXCLUDE_PHRASES = CONFIG.excludePhrases;
+const SYMBOL_ALIASES = CONFIG.aliases;
+const CRYPTO_CODES = new Set(CONFIG.cryptoCodes);
+const FIAT_CODES = new Set(CONFIG.fiatCodes);
+const FUTURES_CODES = new Set(CONFIG.futuresCodes);
+const SHORT_CODE_WHITELIST = new Set(CONFIG.shortCodeWhitelist);
+const COMMON_WORDS = new Set(CONFIG.commonWords);
 
-function extractObject(src, varName) {
-    const re = new RegExp(`${varName}\\s*=\\s*\\{([^}]*)\\}`, 's');
-    const m = src.match(re);
-    if (!m) throw new Error(`Cannot find ${varName} in script`);
-    const obj = {};
-    const pairs = m[1].split(',');
-    for (const pair of pairs) {
-        const colonIdx = pair.indexOf(':');
-        if (colonIdx === -1) continue;
-        const key = pair.slice(0, colonIdx).trim().replace(/^['"]|['"]$/g, '');
-        const val = pair.slice(colonIdx + 1).trim().replace(/^['"]|['"]$/g, '');
-        if (key) obj[key] = val;
-    }
-    return obj;
-}
-
-// Extract all configuration
-const EXCLUDE_CODES = extractSet(scriptSrc, 'EXCLUDE_CODES');
-const EXCLUDE_PHRASES = extractArray(scriptSrc, 'EXCLUDE_PHRASES')
-    .filter(p => !p.startsWith('//'));
-const SYMBOL_ALIASES = extractObject(scriptSrc, 'SYMBOL_ALIASES');
-const CRYPTO_CODES = extractSet(scriptSrc, 'CRYPTO_CODES');
-const FIAT_CODES = extractSet(scriptSrc, 'FIAT_CODES');
-const FUTURES_CODES = extractSet(scriptSrc, 'FUTURES_CODES');
-const COMMON_WORDS = extractSet(scriptSrc, 'COMMON_WORDS');
-const SHORT_CODE_WHITELIST = extractSet(scriptSrc, 'SHORT_CODE_WHITELIST');
-
-// GRAMMAR_WORDS is inside extractStockCodes, handle specially
+// GRAMMAR_WORDS stays hardcoded in .user.js — extract via regex
 const grammarRe = /GRAMMAR_WORDS\s*=\s*new Set\(([\s\S]*?)\);/;
 const grammarM = scriptSrc.match(grammarRe);
 if (!grammarM) throw new Error('Cannot find GRAMMAR_WORDS in script');

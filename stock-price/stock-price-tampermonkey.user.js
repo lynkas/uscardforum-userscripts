@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USCardForum Stock Price
 // @namespace    http://tampermonkey.net/
-// @version      0.4.1
+// @version      4.0
 // @description  Show stock prices inline on USCardForum investment category
 // @match        https://www.uscardforum.com/*
 // @grant        GM_xmlhttpRequest
@@ -19,68 +19,17 @@
     'use strict';
 
     // ═══════════════════════════════════════════════════════════════════════
-    // 排除列表 —— 在这里添加不想匹配的代码（不区分大小写）
+    // 以下配置常量从远程 blacklist.json 加载（见 applyRemoteData）
+    // 本地初始化为空，首次联网拉取后由 GM 缓存持久化
     // ═══════════════════════════════════════════════════════════════════════
-    const EXCLUDE_CODES = new Set([
-        'IPO','PUT','CALL','G','ZS','B','WTF','CAPEX','TLDR','BUY',
-        'ARROW','YTD','OIL','YEAR','BEAT','HOLD','TACO','OPUS','GPT','PAY','FLAT','GAIN','LEAD','IRS','EST','ROTH','LOW','FILL',
-        'JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC','PDT','INDEX','APP',
-        // 'AI', 'ON', 'A',  ← 示例，取消注释即可排除
-    ]);
-
-    // 排除短语 —— 这些连续词组中的每个词都不会被单独匹配为股票代码
-    const EXCLUDE_PHRASES = [
-        'cost basis',
-        'stop loss',
-        'take profit',
-        'debit card',
-        'credit card',
-        'vice versa',
-        'crude oil',
-        'long term',
-        'short term',
-        'negative cor',
-        'positive cor',
-    ];
-
-    // 别名映射 —— 论坛写法 → Yahoo Finance 实际代码
-    const SYMBOL_ALIASES = {
-        'BRKB': 'BRK-B',
-        'BRKA': 'BRK-A',
-        'BRK.B': 'BRK-B',
-        'BRK.A': 'BRK-A',
-        'SPX': '^GSPC',
-        'WTI': 'CL=F',
-    };
-
-    // 加密货币代码 → Yahoo Finance 会自动加 -USD 后缀查询
-    const CRYPTO_CODES = new Set([
-        'BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'USDC', 'DOGE',
-        'ADA', 'TRX', 'AVAX', 'DOT', 'LINK', 'MATIC', 'SHIB', 'LTC',
-        'UNI', 'ATOM', 'XLM', 'ETC', 'BCH', 'FIL', 'APT', 'NEAR',
-        'AAVE', 'ARB', 'OP',
-    ]);
-
-    // 法币代码 → Yahoo Finance 用 CURRENCY=X 格式，显示为 1 USD 兑换价
-    const FIAT_CODES = new Set([
-        'USD', 'CNY', 'EUR', 'GBP', 'JPY', 'KRW', 'CAD', 'AUD', 'CHF', 'HKD',
-        'TWD', 'SGD', 'INR', 'MXN', 'BRL', 'THB', 'MYR', 'PHP', 'VND',
-        'NZD', 'SEK', 'DKK', 'ZAR', 'RUB', 'TRY', 'PLN', 'CZK',
-        'ILS', 'AED', 'SAR', 'CNH',
-    ]);
-
-    // 期货代码 → Yahoo Finance 用 =F 后缀查询
-    const FUTURES_CODES = new Set([
-        // 指数期货
-        'ES', 'NQ', 'YM', 'RTY', 'VIX',
-        // 商品期货
-        'GC', 'SI', 'HG', 'PL', 'PA',  // 贵金属: 金 银 铜 铂 钯
-        'CL', 'NG', 'RB', 'HO', 'BZ',  // 能源: 原油 天然气 汽油 取暖油 布油
-        'ZB', 'ZN', 'ZF', 'ZT',        // 国债: 30Y 10Y 5Y 2Y
-        'ZW', 'ZC', 'ZS', 'KC', 'SB',  // 农产品: 小麦 玉米 大豆 咖啡 糖
-        'CT', 'LBS',                    // 棉花 木材
-    ]);
-    // ═══════════════════════════════════════════════════════════════════════
+    const EXCLUDE_CODES = new Set();
+    const EXCLUDE_PHRASES = [];
+    const SYMBOL_ALIASES = {};
+    const CRYPTO_CODES = new Set();
+    const FIAT_CODES = new Set();
+    const FUTURES_CODES = new Set();
+    const SHORT_CODE_WHITELIST = new Set();
+    const COMMON_WORDS = new Set();
 
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -132,6 +81,18 @@
             user-select: none;
         }
         .sp-toast-close:hover { opacity: 1; }
+        .sp-toast-url {
+            display: block;
+            margin-top: 6px;
+            padding: 4px 6px;
+            background: rgba(0,0,0,0.28);
+            border-radius: 4px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px;
+            word-break: break-all;
+            cursor: pointer;
+            user-select: all;
+        }
         .sp-toast-text { white-space: pre-line; }
     `);
 
@@ -144,9 +105,10 @@
         return _toastContainer;
     }
 
-    function showToast(msg, type, duration) {
+    function showToast(msg, type, duration, opts) {
         type = type || 'info';
         duration = duration || 5000;
+        opts = opts || null;
         const container = _getToastContainer();
         const toast = document.createElement('div');
         toast.className = 'sp-toast sp-toast-' + type;
@@ -157,6 +119,23 @@
         closeBtn.className = 'sp-toast-close';
         closeBtn.textContent = '×';
         toast.appendChild(text);
+        if (opts && opts.url) {
+            const urlEl = document.createElement('code');
+            urlEl.className = 'sp-toast-url';
+            urlEl.textContent = opts.url;
+            urlEl.title = '点击复制链接';
+            urlEl.onclick = function () {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(opts.url).then(
+                        function () { showToast('链接已复制', 'success', 1500); },
+                        function () { _selectEl(urlEl); }
+                    );
+                } else {
+                    _selectEl(urlEl);
+                }
+            };
+            toast.appendChild(urlEl);
+        }
         toast.appendChild(closeBtn);
         container.appendChild(toast);
         requestAnimationFrame(() => toast.classList.add('sp-toast-show'));
@@ -166,6 +145,14 @@
         };
         const timer = setTimeout(dismiss, duration);
         closeBtn.onclick = () => { clearTimeout(timer); dismiss(); };
+    }
+
+    function _selectEl(el) {
+        const range = document.createRange();
+        range.selectNode(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
     }
 
     // ── Per-URL notification counter (anti-spam for auto background failures) ──
@@ -221,43 +208,71 @@
         'https://raw.githubusercontent.com/lynkas/uscardforum-userscripts/main/stock-price/blacklist.json';
     const GMK_URL = 'sp_blacklist_url';
     const GMK_CACHE = 'sp_blacklist_cache';
+    const SCRIPT_VERSION = '4.0';   // bump together with @version to force one-time blacklist refetch
+    const GMK_VER = 'sp_last_script_ver';
 
-    // Baseline snapshot (hardcoded floor — fallback when remote is unreachable)
-    const _FLOOR = {
-        excludeCodes: new Set(EXCLUDE_CODES),
-        excludePhrases: [...EXCLUDE_PHRASES],
-        aliases: { ...SYMBOL_ALIASES },
-    };
-
+    // Populate all config constants from remote data (single source = blacklist.json).
+    // Clears each list first, then fills from whichever fields the JSON provides.
     function applyRemoteData(data) {
-        // 1) Reset to floor (so re-sync reflects deletions from remote)
         EXCLUDE_CODES.clear();
-        _FLOOR.excludeCodes.forEach(c => EXCLUDE_CODES.add(c));
         EXCLUDE_PHRASES.length = 0;
-        EXCLUDE_PHRASES.push(..._FLOOR.excludePhrases);
         for (const k of Object.keys(SYMBOL_ALIASES)) delete SYMBOL_ALIASES[k];
-        Object.assign(SYMBOL_ALIASES, _FLOOR.aliases);
+        CRYPTO_CODES.clear();
+        FIAT_CODES.clear();
+        FUTURES_CODES.clear();
+        SHORT_CODE_WHITELIST.clear();
+        COMMON_WORDS.clear();
 
-        // 2) Per-field override from remote (field present → replace; absent → keep floor)
         if (!data || typeof data !== 'object') return;
         if (Array.isArray(data.excludeCodes)) {
-            EXCLUDE_CODES.clear();
             data.excludeCodes.forEach(c => {
                 if (typeof c === 'string') EXCLUDE_CODES.add(c.toUpperCase());
             });
         }
         if (Array.isArray(data.excludePhrases)) {
-            EXCLUDE_PHRASES.length = 0;
             data.excludePhrases.forEach(p => {
                 if (typeof p === 'string') EXCLUDE_PHRASES.push(p);
             });
         }
         if (data.aliases && typeof data.aliases === 'object' && !Array.isArray(data.aliases)) {
-            for (const k of Object.keys(SYMBOL_ALIASES)) delete SYMBOL_ALIASES[k];
             for (const [k, v] of Object.entries(data.aliases)) {
                 if (typeof v === 'string') SYMBOL_ALIASES[String(k).toUpperCase()] = v;
             }
         }
+        if (Array.isArray(data.cryptoCodes)) {
+            data.cryptoCodes.forEach(c => {
+                if (typeof c === 'string') CRYPTO_CODES.add(c.toUpperCase());
+            });
+        }
+        if (Array.isArray(data.fiatCodes)) {
+            data.fiatCodes.forEach(c => {
+                if (typeof c === 'string') FIAT_CODES.add(c.toUpperCase());
+            });
+        }
+        if (Array.isArray(data.futuresCodes)) {
+            data.futuresCodes.forEach(c => {
+                if (typeof c === 'string') FUTURES_CODES.add(c.toUpperCase());
+            });
+        }
+        if (Array.isArray(data.shortCodeWhitelist)) {
+            data.shortCodeWhitelist.forEach(c => {
+                if (typeof c === 'string') SHORT_CODE_WHITELIST.add(c.toUpperCase());
+            });
+        }
+        if (Array.isArray(data.commonWords)) {
+            data.commonWords.forEach(c => {
+                if (typeof c === 'string') COMMON_WORDS.add(c.toUpperCase());
+            });
+        }
+    }
+
+    // Strip JSONC comments (// line and /* block */) and trailing commas
+    // before JSON.parse. Strings in this file never contain // or /* so safe.
+    function stripJsonc(text) {
+        return text
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/(^|[^:])\/\/.*$/gm, '$1')
+            .replace(/,\s*([}\]])/g, '$1');
     }
 
     function getBlacklistUrl() {
@@ -281,7 +296,7 @@
                 });
             });
             if (resp.status < 200 || resp.status >= 300) throw new Error('HTTP ' + resp.status);
-            const data = JSON.parse(resp.responseText);
+            const data = JSON.parse(stripJsonc(resp.responseText));
             if (typeof data !== 'object' || data === null || Array.isArray(data))
                 throw new Error('JSON 不是对象');
 
@@ -343,12 +358,12 @@
         const cached = GM_getValue(GMK_CACHE, null);
         console.group('[stock-price] 当前黑名单');
         console.log('URL:', url);
-        console.log('缓存来源:', cached ? '远程' : '脚本内地板（未拉到远程）');
+        console.log('缓存来源:', cached ? '远程' : '空（未加载远程配置）');
         console.log('excludeCodes:', [...EXCLUDE_CODES]);
         console.log('excludePhrases:', [...EXCLUDE_PHRASES]);
         console.log('aliases:', { ...SYMBOL_ALIASES });
         console.groupEnd();
-        showToast('已打印到控制台 (F12)\nURL: ' + url + '\n来源: ' + (cached ? '远程缓存' : '地板'), 'info', 4000);
+        showToast('已打印到控制台 (F12)\n来源: ' + (cached ? '远程缓存' : '空（未加载）'), 'info', 8000, { url: url });
     });
 
     // ─── Task 1: Page Detection ───────────────────────────────────────────
@@ -399,44 +414,21 @@
         }
         if (initialized) return;
 
-    // ── Remote blacklist: apply cached data synchronously, fetch async if empty ──
+    // ── Remote blacklist: apply cache synchronously; refetch on script-version change or cache miss ──
     const _cached = GM_getValue(GMK_CACHE, null);
+    const _lastVer = GM_getValue(GMK_VER, '');
+    const _versionChanged = _lastVer !== SCRIPT_VERSION;
     if (_cached) applyRemoteData(_cached);
-    else loadRemoteBlacklist(false).then(function (r) { onSyncResult(r, false); });
+    const _needFetch = _versionChanged || !_cached;
+    if (_versionChanged) GM_setValue(GMK_VER, SCRIPT_VERSION);
+    if (_needFetch) {
+        loadRemoteBlacklist(_versionChanged).then(function (r) {
+            onSyncResult(r, false);
+            processNewPosts();   // first scan now that blacklist is populated
+        });
+    }
 
     // ─── Task 2: Stock Code Extraction ────────────────────────────────────
-
-    const COMMON_WORDS = new Set([
-      'THE','AND','FOR','ARE','BUT','NOT','YOU','ALL','CAN','HER','WAS','ONE',
-      'OUR','OUT','HAS','HIS','HOW','ITS','MAY','NEW','NOW','OLD','SEE','WAY',
-      'WHO','BOY','DID','GET','HIM','LET','SAY','SHE','TOO','USE','DAD','MOM',
-      'MAN','RUN','SET','TRY','ASK','MEN','RAN','OWN','CAME','COME','EACH',
-      'MAKE','LIKE','LONG','LOOK','MANY','SOME','THEM','THEN','THAN','THIS',
-      'THAT','WITH','HAVE','FROM','YOUR','THEY','BEEN','CALL','WILL','JUST',
-      'VERY','TAKE','ALSO','INTO','MORE','OVER','SUCH','AFTER','BACK','COULD',
-      'ONLY','COME','MADE','FIND','HERE','KNOW','LAST','DOWN','SIDE','BEEN',
-      'STILL','BEING','FIRST','ABOUT','OTHER','WHICH','THEIR','THERE','EVERY',
-      'WOULD','ABOVE','COULD','UNDER','THOSE','THESE','BEING','WHERE','WHEN',
-      'WHAT','YOUR','HOURS','DAYS','WEEK','BEST','MOST','GOOD','GREAT','NEED',
-      'HELP','WANT','THINK','GOING','RIGHT','THING','REALLY','ALREADY','BEFORE',
-      'AI',
-    ]);
-
-    const SHORT_CODE_WHITELIST = new Set([
-        // Single letter
-        'B', 'C', 'F', 'G', 'H', 'K', 'L', 'O', 'P', 'Q', 'R',
-        'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-        // Double letter
-        'AA', 'AI', 'AM', 'BA', 'BR', 'CA', 'CI', 'CV', 'DE', 'DU',
-        'EM', 'ET', 'FC', 'FL', 'GE', 'GM', 'GS', 'HP', 'IQ', 'IT',
-        'JO', 'KC', 'KO', 'LI', 'MA', 'MC', 'MR', 'MU', 'NU', 'NV',
-        'PG', 'PL', 'PM', 'QQ', 'SQ', 'ST', 'TM', 'UB', 'UI',
-        'UM', 'VM', 'WU',
-        // Futures 2-letter codes — resolved to =F by fetchPrice
-        'ES', 'NQ', 'YM', 'GC', 'SI', 'HG', 'PA', 'CL', 'NG',
-        'RB', 'HO', 'BZ', 'ZB', 'ZN', 'ZF', 'ZT', 'ZW', 'ZC',
-        'SB', 'CT',
-    ]);
 
     // Grammar words — indicate English prose, not stock codes
     const GRAMMAR_WORDS = new Set([
@@ -1140,7 +1132,9 @@
 
     // ─── Task 6: MutationObserver ─────────────────────────────────────────
 
-    processNewPosts();
+    // Scan immediately only if blacklist is already populated; otherwise the
+    // remote-fetch .then() above will trigger the first scan once it arrives.
+    if (_cached) processNewPosts();
 
     let pendingUpdate = false;
     observer = new MutationObserver(() => {

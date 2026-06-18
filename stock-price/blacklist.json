@@ -1,12 +1,24 @@
 {
-  "version": 1,
+  "version": 4,
+
+  // ── excludeCodes: 看起来像股票代码但不该匹配的词 ──
+  // 包含：交易术语(BUY/HOLD)、月份缩写(JAN-DEC)、财经缩写(YTD/IRS/ROTH)、
+  //       以及恰好是真实股票代码但作为常见英语词默认排除的(ALL/NOW/RUN/for等15个)。
+  // 想放行某个(如想看 AI 价格)就从这里删掉对应项。
   "excludeCodes": [
     "IPO", "PUT", "CALL", "G", "ZS", "B", "WTF", "CAPEX", "TLDR", "BUY",
     "ARROW", "YTD", "OIL", "YEAR", "BEAT", "HOLD", "TACO", "OPUS", "GPT", "PAY",
     "FLAT", "GAIN", "LEAD", "IRS", "EST", "ROTH", "LOW", "FILL",
     "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
-    "PDT", "INDEX", "APP","HIGH","LOW"
+    "PDT", "INDEX", "APP",
+    "ALL", "ARE", "FOR", "HAS", "NOW", "RUN", "MAN", "WAY", "CAN", "OUT",
+    "GOOD", "HERE", "HELP", "YOU", "AI",
+    "NICE", "IT", "MARK", "PLAY", "PM", "CTO", "ET", "EVEN",
+    "HIGH"
   ],
+
+  // ── excludePhrases: 这些短语中的词不会被单独匹配为股票代码 ──
+  // 多词金融/日常短语，避免 "cost basis" 里的 COST 被当成股票。
   "excludePhrases": [
     "cost basis",
     "stop loss",
@@ -18,8 +30,14 @@
     "long term",
     "short term",
     "negative cor",
-    "positive cor"
+    "positive cor",
+    "dot com",
+    "dot plot",
+    "elon musk"
   ],
+
+  // ── aliases: 论坛写法 → Yahoo Finance 实际代码 ──
+  // BRK 加点号无法直接查询，SPX/WTI 需要 Yahoo 专有后缀。
   "aliases": {
     "BRKB": "BRK-B",
     "BRKA": "BRK-A",
@@ -27,5 +45,65 @@
     "BRK.A": "BRK-A",
     "SPX": "^GSPC",
     "WTI": "CL=F"
-  }
+  },
+
+  // ── cryptoCodes: 加密货币，Yahoo 自动加 -USD 后缀查询 ──
+  "cryptoCodes": [
+    "BTC", "ETH", "USDT", "BNB", "SOL", "XRP", "USDC", "DOGE",
+    "ADA", "TRX", "AVAX", "DOT", "LINK", "MATIC", "SHIB", "LTC",
+    "UNI", "ATOM", "XLM", "ETC", "BCH", "FIL", "APT", "NEAR",
+    "AAVE", "ARB", "OP"
+  ],
+
+  // ── fiatCodes: 法币，Yahoo 用 CURRENCY=X 格式，显示为 1 USD 兑换价 ──
+  "fiatCodes": [
+    "USD", "CNY", "EUR", "GBP", "JPY", "KRW", "CAD", "AUD", "CHF", "HKD",
+    "TWD", "SGD", "INR", "MXN", "BRL", "THB", "MYR", "PHP", "VND",
+    "NZD", "SEK", "DKK", "ZAR", "RUB", "TRY", "PLN", "CZK",
+    "ILS", "AED", "SAR", "CNH"
+  ],
+
+  // ── futuresCodes: 期货，Yahoo 用 =F 后缀查询 ──
+  // 指数期货 / 贵金属 / 能源 / 国债 / 农产品
+  "futuresCodes": [
+    "ES", "NQ", "YM", "RTY", "VIX",
+    "GC", "SI", "HG", "PL", "PA",
+    "CL", "NG", "RB", "HO", "BZ",
+    "ZB", "ZN", "ZF", "ZT",
+    "ZW", "ZC", "ZS", "KC", "SB",
+    "CT", "LBS"
+  ],
+
+  // ── shortCodeWhitelist: 允许匹配的单/双字母"真"股票代码 ──
+  // 默认排除规则会跳过 1-2 字母词，这里放行已确认是上市公司的。
+  // (AI 已移到 excludeCodes，故从白名单删除)
+  "shortCodeWhitelist": [
+    "B", "C", "F", "G", "H", "K", "L", "O", "P", "Q", "R",
+    "S", "T", "U", "V", "W", "X", "Y", "Z",
+    "AA", "AM", "BA", "BR", "CA", "CI", "CV", "DE", "DU",
+    "EM", "FC", "FL", "GE", "GM", "GS", "HP", "IQ",
+    "JO", "KC", "KO", "LI", "MA", "MC", "MR", "MU", "NU", "NV",
+    "PG", "PL", "QQ", "SQ", "ST", "TM", "UB", "UI",
+    "UM", "VM", "WU",
+    "ES", "NQ", "YM", "GC", "SI", "HG", "PA", "CL", "NG",
+    "RB", "HO", "BZ", "ZB", "ZN", "ZF", "ZT", "ZW", "ZC",
+    "SB", "CT"
+  ],
+
+  // ── commonWords: 常见英语词，确认不是股票代码，用于过滤误匹配 ──
+  // 已剔除 15 个恰好是真实股票代码的词(它们在 excludeCodes 里)。
+  // 这些是纯英语词汇，Yahoo 上查无对应 ticker。
+  "commonWords": [
+    "THE", "AND", "BUT", "NOT", "HER", "WAS", "ONE", "OUR", "HIS", "HOW",
+    "ITS", "MAY", "NEW", "OLD", "SEE", "WHO", "BOY", "DID", "GET", "HIM",
+    "LET", "SAY", "SHE", "TOO", "USE", "DAD", "MOM", "SET", "TRY", "ASK",
+    "MEN", "RAN", "OWN", "CAME", "COME", "EACH", "MAKE", "LIKE", "LONG", "LOOK",
+    "MANY", "SOME", "THEM", "THEN", "THAN", "THIS", "THAT", "WITH", "HAVE", "FROM",
+    "YOUR", "THEY", "BEEN", "CALL", "WILL", "JUST", "VERY", "TAKE", "ALSO", "INTO",
+    "MORE", "OVER", "SUCH", "AFTER", "BACK", "COULD", "ONLY", "MADE", "FIND", "KNOW",
+    "LAST", "DOWN", "SIDE", "STILL", "BEING", "FIRST", "ABOUT", "OTHER", "WHICH", "THEIR",
+    "THERE", "EVERY", "WOULD", "ABOVE", "UNDER", "THOSE", "THESE", "WHERE", "WHEN", "WHAT",
+    "HOURS", "DAYS", "WEEK", "BEST", "MOST", "GREAT", "NEED", "WANT", "THINK", "GOING",
+    "RIGHT", "THING", "REALLY", "ALREADY", "BEFORE"
+  ]
 }
