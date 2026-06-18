@@ -170,6 +170,18 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    name: 'BRO CPI 被 excludeCodes 排除',
+    input: 'bro CPI',
+    expected: [],
+});
+
+extractionTests.push({
+    name: 'BRO CPI 大小写也排除',
+    input: 'BRO cpi',
+    expected: [],
+});
+
+extractionTests.push({
     name: '颜文字中的单字母不提取 — O被ㄒ包围',
     input: 'ㄒOㄒ',
     expected: [],
