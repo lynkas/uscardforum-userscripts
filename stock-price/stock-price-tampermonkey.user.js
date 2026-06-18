@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USCardForum Stock Price
 // @namespace    http://tampermonkey.net/
-// @version      0.4.0
+// @version      0.4.1
 // @description  Show stock prices inline on USCardForum investment category
 // @match        https://www.uscardforum.com/*
 // @grant        GM_xmlhttpRequest
@@ -82,6 +82,137 @@
     ]);
     // ═══════════════════════════════════════════════════════════════════════
 
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Toast notifications — replaces blocking alert()
+    // ═══════════════════════════════════════════════════════════════════════
+    GM_addStyle(`
+        #sp-toast-container {
+            position: fixed;
+            bottom: 16px;
+            right: 16px;
+            z-index: 2147483647;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+        }
+        .sp-toast {
+            pointer-events: auto;
+            max-width: 360px;
+            min-width: 220px;
+            padding: 10px 30px 10px 14px;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 13px;
+            line-height: 1.45;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+            opacity: 0;
+            transform: translateX(20px);
+            transition: opacity .25s ease, transform .25s ease;
+            position: relative;
+            word-break: break-word;
+            font-family: -apple-system, system-ui, sans-serif;
+        }
+        .sp-toast.sp-toast-show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        .sp-toast-success { background: #16a34a; }
+        .sp-toast-error   { background: #dc2626; }
+        .sp-toast-info    { background: #1f2937; }
+        .sp-toast-close {
+            position: absolute;
+            top: 5px;
+            right: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            opacity: 0.7;
+            user-select: none;
+        }
+        .sp-toast-close:hover { opacity: 1; }
+        .sp-toast-text { white-space: pre-line; }
+    `);
+
+    let _toastContainer = null;
+    function _getToastContainer() {
+        if (_toastContainer && _toastContainer.isConnected) return _toastContainer;
+        _toastContainer = document.createElement('div');
+        _toastContainer.id = 'sp-toast-container';
+        document.body.appendChild(_toastContainer);
+        return _toastContainer;
+    }
+
+    function showToast(msg, type, duration) {
+        type = type || 'info';
+        duration = duration || 5000;
+        const container = _getToastContainer();
+        const toast = document.createElement('div');
+        toast.className = 'sp-toast sp-toast-' + type;
+        const text = document.createElement('span');
+        text.className = 'sp-toast-text';
+        text.textContent = msg;
+        const closeBtn = document.createElement('span');
+        closeBtn.className = 'sp-toast-close';
+        closeBtn.textContent = '×';
+        toast.appendChild(text);
+        toast.appendChild(closeBtn);
+        container.appendChild(toast);
+        requestAnimationFrame(() => toast.classList.add('sp-toast-show'));
+        const dismiss = () => {
+            toast.classList.remove('sp-toast-show');
+            setTimeout(() => { if (toast.isConnected) toast.remove(); }, 300);
+        };
+        const timer = setTimeout(dismiss, duration);
+        closeBtn.onclick = () => { clearTimeout(timer); dismiss(); };
+    }
+
+    // ── Per-URL notification counter (anti-spam for auto background failures) ──
+    const GMK_NOTIFY = 'sp_notify_counts';
+    const NOTIFY_CAP = 2;
+
+    function _getNotifyCounts() {
+        const v = GM_getValue(GMK_NOTIFY, null);
+        if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+        return {};
+    }
+    function _setNotifyCount(url, n) {
+        const counts = _getNotifyCounts();
+        counts[url] = n;
+        GM_setValue(GMK_NOTIFY, counts);
+    }
+    function shouldNotifyForUrl(url) {
+        const n = _getNotifyCounts()[url] || 0;
+        if (n >= NOTIFY_CAP) return false;
+        _setNotifyCount(url, n + 1);
+        return true;
+    }
+    function resetNotifyForUrl(url) {
+        _setNotifyCount(url, 0);
+    }
+
+    // ── Unified sync-result handler ──
+    function _syncSuccessMsg(r) {
+        return '✓ 黑名单同步成功: 代码 ' + r.counts.codes + ' / 短语 ' + r.counts.phrases + ' / 别名 ' + r.counts.aliases;
+    }
+    function _syncFailMsg(r) {
+        return '✗ 黑名单同步失败: ' + r.msg + '\n（已保留旧缓存）';
+    }
+    function onSyncResult(r, isManual) {
+        const url = getBlacklistUrl();
+        if (r.ok) {
+            resetNotifyForUrl(url);   // success → reset this URL's failure count
+            if (isManual) showToast(_syncSuccessMsg(r), 'success');
+            // auto success: silent (normal flow)
+            return;
+        }
+        if (isManual) {
+            showToast(_syncFailMsg(r), 'error', 6000);
+        } else if (shouldNotifyForUrl(url)) {
+            showToast(_syncFailMsg(r), 'error', 6000);
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // Remote blacklist — default uses repo JSON, user can swap to their gist
@@ -189,29 +320,22 @@
         const trimmed = input.trim();
         if (trimmed === '') {
         GM_setValue(GMK_URL, DEFAULT_BLACKLIST_URL);
-        alert('已恢复默认链接，正在同步…');
-            loadRemoteBlacklist(true).then(function (r) {
-                alert(r.ok ? '✓ 同步成功\n代码 ' + r.counts.codes + ' / 短语 ' + r.counts.phrases + ' / 别名 ' + r.counts.aliases + '\n\n刷新页面后对新帖生效'
-                           : '✗ 同步失败: ' + r.msg + '\n（已保留旧缓存）');
-            });
+        resetNotifyForUrl(DEFAULT_BLACKLIST_URL);
+        showToast('已恢复默认链接，正在同步…', 'info', 3000);
+            loadRemoteBlacklist(true).then(function (r) { onSyncResult(r, true); });
             return;
         }
         if (!RE_URL.test(trimmed)) {
-            alert('✗ 链接格式不对\n需要 https://raw.githubusercontent.com/... 或 https://gist.githubusercontent.com/...');
+            showToast('✗ 链接格式不对\n需要 raw.githubusercontent.com 或 gist.githubusercontent.com', 'error', 6000);
             return;
         }
         GM_setValue(GMK_URL, trimmed);
-        loadRemoteBlacklist(true).then(function (r) {
-            alert(r.ok ? '✓ 同步成功\n代码 ' + r.counts.codes + ' / 短语 ' + r.counts.phrases + ' / 别名 ' + r.counts.aliases + '\n\n刷新页面后对新帖生效'
-                       : '✗ 同步失败: ' + r.msg + '\n（已保留旧缓存）');
-        });
+        resetNotifyForUrl(trimmed);
+        loadRemoteBlacklist(true).then(function (r) { onSyncResult(r, true); });
     });
 
     GM_registerMenuCommand('🔄 立即重新同步黑名单', () => {
-        loadRemoteBlacklist(true).then(function (r) {
-            alert(r.ok ? '✓ 同步成功\n代码 ' + r.counts.codes + ' / 短语 ' + r.counts.phrases + ' / 别名 ' + r.counts.aliases + '\n\n刷新页面后对新帖生效'
-                       : '✗ 同步失败: ' + r.msg + '\n（已保留旧缓存）');
-        });
+        loadRemoteBlacklist(true).then(function (r) { onSyncResult(r, true); });
     });
 
     GM_registerMenuCommand('📋 查看当前生效黑名单', () => {
@@ -224,7 +348,7 @@
         console.log('excludePhrases:', [...EXCLUDE_PHRASES]);
         console.log('aliases:', { ...SYMBOL_ALIASES });
         console.groupEnd();
-        alert('已打印到控制台 (F12)\nURL: ' + url + '\n来源: ' + (cached ? '远程缓存' : '地板'));
+        showToast('已打印到控制台 (F12)\nURL: ' + url + '\n来源: ' + (cached ? '远程缓存' : '地板'), 'info', 4000);
     });
 
     // ─── Task 1: Page Detection ───────────────────────────────────────────
@@ -278,7 +402,7 @@
     // ── Remote blacklist: apply cached data synchronously, fetch async if empty ──
     const _cached = GM_getValue(GMK_CACHE, null);
     if (_cached) applyRemoteData(_cached);
-    else loadRemoteBlacklist(false);
+    else loadRemoteBlacklist(false).then(function (r) { onSyncResult(r, false); });
 
     // ─── Task 2: Stock Code Extraction ────────────────────────────────────
 
