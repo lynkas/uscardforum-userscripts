@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USCardForum Stock Price
 // @namespace    http://tampermonkey.net/
-// @version      4.0.1
+// @version      0.4.0
 // @description  Show stock prices inline on USCardForum investment category
 // @match        https://www.uscardforum.com/*
 // @grant        GM_xmlhttpRequest
@@ -10,8 +10,7 @@
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
 // @connect      query1.finance.yahoo.com
-// @connect      raw.githubusercontent.com
-// @connect      gist.githubusercontent.com
+// @connect      *
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -106,7 +105,6 @@
     }
 
     function showToast(msg, type, duration, opts) {
-        console.log('[stock-price] showToast called: type=' + (type || 'info') + ', msg=' + (msg || '').slice(0, 40));
         type = type || 'info';
         duration = duration || 5000;
         opts = opts || null;
@@ -208,7 +206,7 @@
         'https://raw.githubusercontent.com/lynkas/uscardforum-userscripts/main/stock-price/blacklist.json';
     const GMK_URL = 'sp_blacklist_url';
     const GMK_CACHE = 'sp_blacklist_cache';
-    const SCRIPT_VERSION = '4.0.1';   // bump together with @version to force one-time blacklist refetch
+    const SCRIPT_VERSION = '0.4.0';   // bump together with @version to force one-time blacklist refetch
     const GMK_VER = 'sp_last_script_ver';
 
     // Populate all config constants from remote data (single source = blacklist.json).
@@ -320,14 +318,13 @@
         }
     }
 
-    const RE_URL = /^https:\/\/(raw\.githubusercontent\.com|gist\.githubusercontent\.com)\/.+/i;
+    const RE_URL = /^https:\/\/.+/i;
 
     GM_registerMenuCommand('⚙️ 设置黑名单同步链接…', () => {
         const cur = getBlacklistUrl();
         const input = prompt(
-            '黑名单 JSON 的 raw 链接：\n\n' +
-            '支持 raw.githubusercontent.com 或 gist.githubusercontent.com\n' +
-            '（不要用 gist.github.com 网页链接）\n\n' +
+            '黑名单 JSON 的链接（需 HTTPS，返回 JSON）：\n\n' +
+            '支持任意能 GET 返回 JSON 的地址（GitHub raw、Gist raw、自建服务等）。\n\n' +
             '留空恢复默认。',
             cur
         );
@@ -341,7 +338,7 @@
             return;
         }
         if (!RE_URL.test(trimmed)) {
-            showToast('✗ 链接格式不对\n需要 raw.githubusercontent.com 或 gist.githubusercontent.com', 'error', 6000);
+            showToast('✗ 链接格式不对\n需要 https:// 开头的地址', 'error', 6000);
             return;
         }
         GM_setValue(GMK_URL, trimmed);
@@ -425,19 +422,14 @@
     const _cached = GM_getValue(GMK_CACHE, null);
     const _lastVer = GM_getValue(GMK_VER, '');
     const _versionChanged = _lastVer !== SCRIPT_VERSION;
-    console.log('[stock-price] init blacklist: cached=' + (_cached ? 'YES' : 'NO') + ', lastVer="' + _lastVer + '", versionChanged=' + _versionChanged);
     if (_cached) applyRemoteData(_cached);
     const _needFetch = _versionChanged || !_cached;
     if (_versionChanged) GM_setValue(GMK_VER, SCRIPT_VERSION);
     if (_needFetch) {
-        console.log('[stock-price] init: calling loadRemoteBlacklist (force=' + _versionChanged + ')');
         loadRemoteBlacklist(_versionChanged).then(function (r) {
-            console.log('[stock-price] init: loadRemoteBlacklist resolved, r=', JSON.stringify(r));
             onSyncResult(r, false);
             processNewPosts();   // first scan now that blacklist is populated
         });
-    } else {
-        console.log('[stock-price] init: no fetch needed, using cache');
     }
 
     // ─── Task 2: Stock Code Extraction ────────────────────────────────────

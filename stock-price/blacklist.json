@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
 
   // ── excludeCodes: 看起来像股票代码但不该匹配的词 ──
   // 包含：交易术语(BUY/HOLD)、月份缩写(JAN-DEC)、财经缩写(YTD/IRS/ROTH)、
@@ -15,7 +15,12 @@
     "GOOD", "HERE", "HELP", "YOU", "AI",
     "NICE", "IT", "MARK", "PLAY", "PM", "CTO", "ET", "EVEN",
     "HIGH",
-    "SELL", "LOWER"
+    "SELL", "LOWER",
+    "TMD",
+    "STOCK", "BLAH", "NRA", "HTTPS",
+    "BUG",
+    "ADR", "BETA", "MEME", "MOAT", "EASY", "BILL",
+    "EXP"
   ],
 
   // ── excludePhrases: 这些短语中的词不会被单独匹配为股票代码 ──
@@ -34,7 +39,9 @@
     "positive cor",
     "dot com",
     "dot plot",
-    "elon musk"
+    "elon musk",
+    "tax bracket",
+    "open weight"
   ],
 
   // ── aliases: 论坛写法 → Yahoo Finance 实际代码 ──
