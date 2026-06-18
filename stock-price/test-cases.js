@@ -1049,9 +1049,9 @@ isTickerLikeTests.push({
 });
 
 isTickerLikeTests.push({
-    name: '混合大小写 → false',
+    name: '混合大小写3字母以上 → true',
     input: 'Nvda',
-    expected: false,
+    expected: true,
 });
 
 isTickerLikeTests.push({

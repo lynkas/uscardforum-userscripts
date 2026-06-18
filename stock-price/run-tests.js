@@ -52,6 +52,7 @@ function classifyParagraph(para) {
 }
 
 function isTickerLike(word) {
+    if (word.length >= 3 && !COMMON_WORDS.has(word.toUpperCase())) return true;
     if (word.length >= 2 && word === word.toUpperCase()) return true;
     if (word.includes('.')) return true;
     const upper = word.toUpperCase();
@@ -340,16 +341,13 @@ function runSuite(name, tests, fn) {
 
     for (const test of tests) {
         let result;
-        let ok;
         try {
             result = fn(test);
-            ok = true;
         } catch (e) {
-            ok = false;
             result = `ERROR: ${e.message}`;
         }
 
-        if (ok) {
+        if (result === null) {
             passed++;
             console.log(`  PASS  ${test.name}`);
         } else {

@@ -458,6 +458,7 @@
     }
 
     function isTickerLike(word) {
+        if (word.length >= 3 && !COMMON_WORDS.has(word.toUpperCase())) return true;
         if (word.length >= 2 && word === word.toUpperCase()) return true;
         if (word.includes('.')) return true;
         const upper = word.toUpperCase();
