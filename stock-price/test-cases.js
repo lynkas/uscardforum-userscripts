@@ -128,6 +128,18 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    name: 'api agi 被 excludeCodes 排除',
+    input: 'api agi',
+    expected: [],
+});
+
+extractionTests.push({
+    name: 'API AGI 大小写也排除',
+    input: 'API AGI',
+    expected: [],
+});
+
+extractionTests.push({
     name: '$EXACT .INX 点号开头',
     input: '$.INX $.SPX $.DJI',
     expected: ['.INX', '.SPX', '.DJI'],
