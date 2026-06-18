@@ -1339,5 +1339,6 @@ groupParagraphsTests.push({
     expected: [
         { type: 'codelist', text: '' },
         { type: 'codelist', text: '' },
+        { type: 'codelist', text: '' },
     ],
 });

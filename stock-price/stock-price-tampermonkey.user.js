@@ -444,7 +444,7 @@
         'BELOW','BETWEEN','UNDER','OVER','AND','BUT','OR','NOR','NOT','SO',
         'YET','IF','THAN','THAT','THIS','IT','HE','SHE','WE','THEY','MY',
         'YOUR','HIS','HER','ITS','OUR','ME','HIM','US','THEM','WHAT','WHICH',
-        'WHO','WHEN','WHERE','HOW','WHY',
+        'WHO','WHEN','WHERE','HOW','I','WHY',
     ]);
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -469,10 +469,10 @@
     }
 
     function isAcceptedCode(code) {
-        if (code.length < 2) return false;
         if (SHORT_CODE_WHITELIST.has(code) || SYMBOL_ALIASES[code] || FUTURES_CODES.has(code)) return true;
         const dotIdx = code.indexOf('.');
         if (dotIdx >= 0 && code.length - dotIdx - 1 < 2) return false;
+        if (code.length < 2) return false;
         return code.length >= 3;
     }
 
@@ -485,7 +485,7 @@
             const para = paragraphs[i];
             const type = classifyParagraph(para);
 
-            if (type === 'chinese') {
+            if (type === 'chinese' || para === '') {
                 groups.push({ type, text: para, offset });
                 offset += para.length + 1;
                 i++;
@@ -544,7 +544,7 @@
         return { codes, zones };
     }
 
-    const RE_FOREX = /(?<![A-Za-z\d])([A-Za-z]{6})(=?([A-Za-z]))?(?![A-Za-z\d])/g;
+    const RE_FOREX = /(?<![A-Za-z\d])([A-Za-z]{6})(?![A-Za-z])(=?([A-Za-z]))?(?![A-Za-z\d])/g;
 
     function collectForexPairs(text, offset) {
         const codes = new Set();
@@ -871,7 +871,7 @@
 
     function buildPriceContent(symbol, priceData) {
         if (FIAT_CODES.has(symbol)) {
-            return `($1=${symbol}${priceData.price.toFixed(2)} ${formatChange(priceData.change)}%)`;
+            return `(1=${symbol}${priceData.price.toFixed(2)} ${formatChange(priceData.change)}%)`;
         }
 
         const session = getMarketSession(priceData.tradingPeriod);

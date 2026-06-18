@@ -63,10 +63,10 @@ function isTickerLike(word) {
 }
 
 function isAcceptedCode(code) {
-    if (code.length < 2) return false;
     if (SHORT_CODE_WHITELIST.has(code) || SYMBOL_ALIASES[code] || FUTURES_CODES.has(code)) return true;
     const dotIdx = code.indexOf('.');
     if (dotIdx >= 0 && code.length - dotIdx - 1 < 2) return false;
+    if (code.length < 2) return false;
     return code.length >= 3;
 }
 
@@ -79,7 +79,7 @@ function groupParagraphs(text) {
         const para = paragraphs[i];
         const type = classifyParagraph(para);
 
-        if (type === 'chinese') {
+        if (type === 'chinese' || para === '') {
             groups.push({ type, text: para, offset });
             offset += para.length + 1;
             i++;
@@ -137,7 +137,7 @@ function collectDotCodes(text, offset) {
     return { codes, zones };
 }
 
-const RE_FOREX = /(?<![A-Za-z\d])([A-Za-z]{6})(=?([A-Za-z]))?(?![A-Za-z\d])/g;
+const RE_FOREX = /(?<![A-Za-z\d])([A-Za-z]{6})(?![A-Za-z])(=?([A-Za-z]))?(?![A-Za-z\d])/g;
 
 function collectForexPairs(text, offset) {
     const codes = new Set();
@@ -286,7 +286,7 @@ function formatChange(val) {
 function formatPriceText(symbol, priceData) {
     const isFiat = FIAT_CODES.has(symbol);
     if (isFiat) {
-        return `($1=${symbol}${priceData.price.toFixed(2)} ${formatChange(priceData.change)}%)`;
+        return `(1=${symbol}${priceData.price.toFixed(2)} ${formatChange(priceData.change)}%)`;
     }
     const tp = priceData.tradingPeriod;
     const session = getMarketSession(tp, priceData._nowS ?? Date.now() / 1000);
