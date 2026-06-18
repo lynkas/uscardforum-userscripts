@@ -164,6 +164,12 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    name: 'CUE 被 excludeCodes 排除',
+    input: 'cue CUE',
+    expected: [],
+});
+
+extractionTests.push({
     name: '$EXACT .INX 点号开头',
     input: '$.INX $.SPX $.DJI',
     expected: ['.INX', '.SPX', '.DJI'],
