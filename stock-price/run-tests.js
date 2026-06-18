@@ -45,7 +45,7 @@ const GRAMMAR_WORDS = new Set(
 
 function classifyParagraph(para) {
     if (/[^\x00-\x7F]/.test(para)) return 'chinese';
-    const words = [...para.matchAll(/[A-Za-z']+/g)].map(m => m[0].toUpperCase());
+    const words = [...para.matchAll(/[A-Za-z.']+/g)].map(m => m[0].toUpperCase());
     if (words.some(w => GRAMMAR_WORDS.has(w))) return 'prose';
     if (words.length > 10) return 'prose';
     return 'codelist';
@@ -64,8 +64,10 @@ function isTickerLike(word) {
 
 function isAcceptedCode(code) {
     if (code.length < 2) return false;
-    return code.length >= 3 || SHORT_CODE_WHITELIST.has(code)
-        || SYMBOL_ALIASES[code] || FUTURES_CODES.has(code);
+    if (SHORT_CODE_WHITELIST.has(code) || SYMBOL_ALIASES[code] || FUTURES_CODES.has(code)) return true;
+    const dotIdx = code.indexOf('.');
+    if (dotIdx >= 0 && code.length - dotIdx - 1 < 2) return false;
+    return code.length >= 3;
 }
 
 function groupParagraphs(text) {
@@ -105,7 +107,8 @@ const RE_EXACT = /\$([A-Za-z0-9.\-=^]*[A-Za-z0-9])/g;
 function collectExactCodes(text) {
     const codes = new Set();
     for (const m of text.matchAll(RE_EXACT)) {
-        codes.add(m[1].toUpperCase());
+        const code = m[1].toUpperCase();
+        if (/[A-Z]/.test(code)) codes.add(code);
     }
     return codes;
 }
@@ -151,7 +154,7 @@ function collectForexPairs(text, offset) {
 
 function buildGrammarZones(text, offset) {
     const zones = [];
-    for (const m of text.matchAll(/[A-Za-z']+(?:[^A-Za-z'\n]+[A-Za-z']+)+/g)) {
+    for (const m of text.matchAll(/[A-Za-z']+(?:[^A-Za-z'\n\u4e00-\u9fff\u3040-\u309f\uac00-\ud7af]+[A-Za-z']+)+/g)) {
         const words = m[0].split(/[^A-Za-z']+/).filter(Boolean).map(w => w.toUpperCase());
         if (words.length >= 3 && words.some(w => GRAMMAR_WORDS.has(w))) {
             zones.push([offset + m.index, offset + m.index + m[0].length]);
