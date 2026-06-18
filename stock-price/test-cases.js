@@ -107,6 +107,30 @@ extractionTests.push({
     expected: [],
 });
 
+extractionTests.push({
+    name: 'edit: 冒号后缀不提取（其余独立词照常）',
+    input: 'edit: added more info',
+    expected: ['ADDED', 'INFO'],
+});
+
+extractionTests.push({
+    name: 'update: 冒号后缀不提取（其余独立词照常）',
+    input: 'update: fixed the bug',
+    expected: ['FIXED'],
+});
+
+extractionTests.push({
+    name: '冒号后缀在中国段中也不提取',
+    input: 'edit: 补充说明一下NVDA涨了',
+    expected: ['NVDA'],
+});
+
+extractionTests.push({
+    name: 'note: 冒号后缀不提取但独立NOTE提取',
+    input: 'note: something\nNOTE',
+    expected: ['NOTE'],
+});
+
 // ── 白名单和特殊代码 ──
 
 extractionTests.push({

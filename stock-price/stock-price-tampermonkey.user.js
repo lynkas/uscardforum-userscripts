@@ -590,7 +590,7 @@
         return zones;
     }
 
-    const RE_STANDALONE = /(?<![A-Za-z\d'])([A-Za-z]{1,5}(?:\.[A-Za-z])?)(?![A-Za-z\d])/g;
+    const RE_STANDALONE = /(?<![A-Za-z\d'])([A-Za-z]{1,5}(?:\.[A-Za-z])?)(?![A-Za-z\d:])/g;
 
     function collectStandalone(text, offset, zones) {
         const codes = new Set();
