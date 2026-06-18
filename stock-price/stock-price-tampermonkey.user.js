@@ -366,6 +366,13 @@
         showToast('已打印到控制台 (F12)\n来源: ' + (cached ? '远程缓存' : '空（未加载）'), 'info', 8000, { url: url });
     });
 
+    GM_registerMenuCommand('🧹 清除黑名单缓存（测试）', () => {
+        GM_setValue(GMK_CACHE, null);
+        GM_setValue(GMK_VER, '');
+        console.log('[stock-price] cache cleared via menu');
+        alert('黑名单缓存已清除，刷新页面后会重新拉取');
+    });
+
     // ─── Task 1: Page Detection ───────────────────────────────────────────
 
     function isInvestmentCategory() {
@@ -1275,6 +1282,16 @@
             return { pagePriceMap: [...pagePriceMap.keys()], deadSymbols: [...deadSymbols], pending: [...pendingFetches] };
         }
     };
+    // Allow clearing cache from page console (DOM events cross the TM sandbox):
+    //   document.dispatchEvent(new Event('sp-clear-cache'))
+    // then reload to trigger a fresh auto-fetch.
+    document.addEventListener('sp-clear-cache', function () {
+        GM_setValue(GMK_CACHE, null);
+        GM_setValue(GMK_VER, '');
+        console.log('[stock-price] cache cleared (sp_blacklist_cache + sp_last_script_ver). Reload to refetch.');
+        alert('黑名单缓存已清除，刷新页面后会重新拉取');
+    });
+
     console.log('[stock-price] Debug: use __stockPriceDebug.stats(), .recent(), .symbols(), .getLog()');
 
     initialized = true;
