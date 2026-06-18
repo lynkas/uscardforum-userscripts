@@ -5,7 +5,7 @@
     "ARROW", "YTD", "OIL", "YEAR", "BEAT", "HOLD", "TACO", "OPUS", "GPT", "PAY",
     "FLAT", "GAIN", "LEAD", "IRS", "EST", "ROTH", "LOW", "FILL",
     "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
-    "PDT", "INDEX", "APP"
+    "PDT", "INDEX", "APP","HIGH","LOW"
   ],
   "excludePhrases": [
     "cost basis",
