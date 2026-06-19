@@ -188,6 +188,12 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    name: 'SIZE NASA ELON 被 excludeCodes 排除',
+    input: 'size nasa elon',
+    expected: [],
+});
+
+extractionTests.push({
     name: '颜文字中的单字母不提取 — O被ㄒ包围',
     input: 'ㄒOㄒ',
     expected: [],
