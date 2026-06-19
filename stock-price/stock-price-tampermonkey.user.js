@@ -691,10 +691,7 @@
             !deadSymbols.has(s) &&
             !pagePriceMap.has(s)
         );
-        if (deduped.length === 0) {
-            if (onBatchCb) onBatchCb(pagePriceMap);
-            return;
-        }
+        if (deduped.length === 0) return;
         symbolFetchQueue.push(...deduped);
         if (onBatchCb) {
             queueCallbacks.push({ symbols: new Set(deduped), onBatch: onBatchCb });
@@ -1196,7 +1193,7 @@
             }
             // Re-scan live DOM — Discourse may have replaced .cooked elements
             // between extraction and fetch completion (bottom-to-top scrolling)
-            processNewPosts();
+            requestAnimationFrame(() => processNewPosts());
         }).then(({ priceMap: freshMap, retrySymbols }) => {
             for (const code of codesToFetch) {
                 if (!freshMap.has(code) && !retrySymbols.has(code)) {
