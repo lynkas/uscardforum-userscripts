@@ -655,7 +655,89 @@
 
     const priceCache = new Map(); // symbol -> { data, timestamp }
     const CACHE_TTL = 60000; // 60 seconds
+    function symbolJitter(symbol) {
+        let hash = 0;
+        for (let i = 0; i < symbol.length; i++) {
+            hash = ((hash << 5) - hash) + symbol.charCodeAt(i);
+        }
+        return (Math.abs(hash) % 60001) - 30000;
+    }
     const pendingFetches = new Set(); // symbols currently being fetched
+    const symbolFetchQueue = [];
+    let queueDraining = false;
+    const queueCallbacks = [];
+
+    function updateSymbolSpans(symbol, priceData) {
+        const spans = document.querySelectorAll(`.sp-stock-price[data-sp-symbol="${symbol}"]`);
+        if (spans.length === 0) return;
+        const session = getMarketSession(priceData.tradingPeriod);
+        const isClosed = session === 'closed';
+        const changeClass = priceData.change > 0 ? 'sp-up' : priceData.change < 0 ? 'sp-down' : 'sp-flat';
+        const priceContent = buildPriceContent(symbol, priceData);
+        for (const span of spans) {
+            span.innerHTML = priceContent;
+            span.classList.remove('sp-up', 'sp-down', 'sp-flat');
+            span.classList.add(changeClass);
+            if (!FIAT_CODES.has(symbol)) {
+                span.classList.toggle('sp-closed', isClosed);
+            }
+        }
+    }
+
+    function enqueueSymbols(symbols, onBatchCb) {
+        const deduped = symbols.filter(s =>
+            !symbolFetchQueue.includes(s) &&
+            !pendingFetches.has(s) &&
+            !deadSymbols.has(s) &&
+            !pagePriceMap.has(s)
+        );
+        if (deduped.length === 0) {
+            if (onBatchCb) onBatchCb(pagePriceMap);
+            return;
+        }
+        symbolFetchQueue.push(...deduped);
+        if (onBatchCb) {
+            queueCallbacks.push({ symbols: new Set(deduped), onBatch: onBatchCb });
+        }
+        if (!queueDraining) drainFetchQueue();
+    }
+
+    async function drainFetchQueue() {
+        queueDraining = true;
+        let firstBatch = true;
+        while (symbolFetchQueue.length > 0) {
+            if (!firstBatch) {
+                log('queue delay', BATCH_INTERVAL, 'ms');
+                await new Promise(r => setTimeout(r, BATCH_INTERVAL));
+            }
+            firstBatch = false;
+            const batch = symbolFetchQueue.splice(0, BATCH_SIZE);
+            log('queue batch', batch.join(','));
+            batch.forEach(s => pendingFetches.add(s));
+            const results = await Promise.all(batch.map(s => fetchPrice(s)));
+            const fetched = [];
+            for (let i = 0; i < batch.length; i++) {
+                const symbol = batch[i];
+                const result = results[i];
+                pendingFetches.delete(symbol);
+                if (result?._retry) continue;
+                if (result) {
+                    priceCache.set(symbol, { data: result, timestamp: Date.now() });
+                    pagePriceMap.set(symbol, result);
+                    fetched.push(result);
+                } else {
+                    deadSymbols.add(symbol);
+                }
+            }
+            for (const r of fetched) updateSymbolSpans(r.symbol, r);
+            for (const cb of queueCallbacks) {
+                try { cb.onBatch(pagePriceMap); } catch (e) {}
+            }
+        }
+        queueDraining = false;
+        queueCallbacks.length = 0;
+    }
+
     let lastRequestTime = 0;
     let requestCount = 0;
     let requestLog = []; // { time, symbol, status, duration, gap }
@@ -694,7 +776,13 @@
                     if (requestLog.length > 200) requestLog.shift();
 
                     if (response.status === 429) {
-                        console.warn(`[stock-price] ⚠️ 429 RATE LIMITED ${symbol} (gap=${gap}ms, duration=${duration}ms, queue=${pendingFetches.size})`);
+                        console.log('[stock-price] ⚠ rate limited, retry later:', resolved);
+                        resolve({ _retry: true });
+                        return;
+                    }
+                    if (response.status === 404) {
+                        console.log('[stock-price] ✗ 404 not found:', resolved);
+                        pendingFetches.delete(resolved);
                         resolve(null);
                         return;
                     }
@@ -734,65 +822,45 @@
                         resolve(null);
                     }
                 },
-                onerror() {
-                    resolve(null);
-                },
-                ontimeout() {
-                    resolve(null);
-                }
+                onerror() { resolve({ _retry: true }); },
+                ontimeout() { resolve({ _retry: true }); }
             });
         });
     }
 
-    const BATCH_SIZE = 20;
+    const BATCH_SIZE = 30;
     const BATCH_INTERVAL = 5000;
 
     async function fetchPrices(symbols, onBatch) {
         const priceMap = new Map();
-        const toFetch = [];
+        const retrySymbols = new Set();
         const now = Date.now();
+        const toFetch = [];
 
-        // Check cache for each symbol, skip pending
         for (const symbol of symbols) {
             if (pendingFetches.has(symbol)) continue;
             const cached = priceCache.get(symbol);
-            if (cached && (now - cached.timestamp) < CACHE_TTL) {
+            if (cached && (now - cached.timestamp) < (CACHE_TTL + symbolJitter(symbol))) {
                 priceMap.set(symbol, cached.data);
             } else {
                 toFetch.push(symbol);
             }
         }
 
-        if (toFetch.length === 0) {
-            if (onBatch && priceMap.size > 0) onBatch(priceMap);
-            return priceMap;
-        }
+        if (onBatch && priceMap.size > 0) onBatch(priceMap);
+        if (toFetch.length === 0) return { priceMap, retrySymbols };
 
-        // Mark all as pending immediately to prevent duplicate requests
-        toFetch.forEach(s => pendingFetches.add(s));
+        enqueueSymbols(toFetch, onBatch);
 
-        // Fetch in batches of 20, with 5s between batches
-        for (let i = 0; i < toFetch.length; i += BATCH_SIZE) {
-            const batch = toFetch.slice(i, i + BATCH_SIZE);
-            console.log(`[stock-price] batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(toFetch.length / BATCH_SIZE)}: ${batch.join(', ')}`);
-            const results = await Promise.all(batch.map(s => fetchPrice(s)));
-            for (const result of results) {
-                if (result) {
-                    priceMap.set(result.symbol, result);
-                    priceCache.set(result.symbol, { data: result, timestamp: Date.now() });
-                }
-            }
-            // Remove from pending
-            batch.forEach(s => pendingFetches.delete(s));
-            // Notify caller after each batch so DOM can update progressively
-            if (onBatch && priceMap.size > 0) onBatch(priceMap);
-            if (i + BATCH_SIZE < toFetch.length) {
-                console.log(`[stock-price] waiting ${BATCH_INTERVAL}ms before next batch...`);
-                await new Promise(r => setTimeout(r, BATCH_INTERVAL));
+        for (const symbol of toFetch) {
+            if (pagePriceMap.has(symbol)) {
+                priceMap.set(symbol, pagePriceMap.get(symbol));
+            } else if (!deadSymbols.has(symbol)) {
+                retrySymbols.add(symbol);
             }
         }
 
-        return priceMap;
+        return { priceMap, retrySymbols };
     }
 
     // ─── Task 4: Styles ───────────────────────────────────────────────────
@@ -1129,10 +1197,9 @@
             // Re-scan live DOM — Discourse may have replaced .cooked elements
             // between extraction and fetch completion (bottom-to-top scrolling)
             processNewPosts();
-        }).then(freshMap => {
-            // Mark codes that returned no data as dead
+        }).then(({ priceMap: freshMap, retrySymbols }) => {
             for (const code of codesToFetch) {
-                if (!freshMap.has(code)) {
+                if (!freshMap.has(code) && !retrySymbols.has(code)) {
                     deadSymbols.add(code);
                     log('processNewPosts: marking dead', code);
                 }
@@ -1184,7 +1251,7 @@
         // Filter to needs-refresh, then take top 20 by recency
         const needsRefresh = allSymbols.filter(s => {
             const last = lastRefresh.get(s) || 0;
-            if (now - last < REFRESH_INTERVAL) return false;
+            if (now - last < (REFRESH_INTERVAL + symbolJitter(s))) return false;
             const priceData = pagePriceMap.get(s);
             const tp = priceData?.tradingPeriod;
             if (tp?.regular && tp.regular.end > nowS - 14400) {
@@ -1202,49 +1269,13 @@
 
         log('refreshing', toRefresh.length, 'symbols:', toRefresh.join(','));
 
-        function updateSymbolSpans(symbol, priceData) {
-            const spans = document.querySelectorAll(`.sp-stock-price[data-sp-symbol="${symbol}"]`);
-            if (spans.length === 0) { log('no spans found for', symbol); return; }
-
-            const session = getMarketSession(priceData.tradingPeriod);
-            const isClosed = session === 'closed';
-            const changeClass = priceData.change > 0 ? 'sp-up' : priceData.change < 0 ? 'sp-down' : 'sp-flat';
-            const priceContent = buildPriceContent(symbol, priceData);
-
-            for (const span of spans) {
-                span.innerHTML = priceContent;
-                span.classList.remove('sp-up', 'sp-down', 'sp-flat');
-                span.classList.add(changeClass);
-                if (!FIAT_CODES.has(symbol)) {
-                    span.classList.toggle('sp-closed', isClosed);
-                }
+        toRefresh.forEach(s => lastRefresh.set(s, Date.now()));
+        toRefresh.forEach(s => {
+            if (!deadSymbols.has(s) && recentlySeen.has(s)) {
+                enqueueSymbols([s]);
             }
-            log('updated', spans.length, 'span(s) for', symbol);
-        }
-
-        // Fetch in batches of 20, update DOM after each batch
-        for (let i = 0; i < toRefresh.length; i += BATCH_SIZE) {
-            const batch = toRefresh.slice(i, i + BATCH_SIZE);
-            log('refresh batch:', batch.join(', '));
-            const results = await Promise.all(batch.map(s => fetchPrice(s)));
-            for (let j = 0; j < batch.length; j++) {
-                const symbol = batch[j];
-                const result = results[j];
-                lastRefresh.set(symbol, Date.now());
-                if (result) {
-                    pagePriceMap.set(symbol, result);
-                    priceCache.set(symbol, { data: result, timestamp: Date.now() });
-                    updateSymbolSpans(symbol, result);
-                } else {
-                    log('fetch failed, marking dead:', symbol);
-                    deadSymbols.add(symbol);
-                    pagePriceMap.delete(symbol);
-                }
-            }
-            if (i + BATCH_SIZE < toRefresh.length) {
-                await new Promise(r => setTimeout(r, BATCH_INTERVAL));
-            }
-        }
+        });
+        if (!queueDraining) drainFetchQueue();
 
         log('refresh complete');
     }
