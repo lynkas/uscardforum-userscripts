@@ -684,12 +684,12 @@
         }
     }
 
-    function enqueueSymbols(symbols, onBatchCb) {
+    function enqueueSymbols(symbols, onBatchCb, force) {
         const deduped = symbols.filter(s =>
             !symbolFetchQueue.includes(s) &&
             !pendingFetches.has(s) &&
             !deadSymbols.has(s) &&
-            !pagePriceMap.has(s)
+            (force || !pagePriceMap.has(s))
         );
         if (deduped.length === 0) return;
         symbolFetchQueue.push(...deduped);
@@ -1269,7 +1269,7 @@
         toRefresh.forEach(s => lastRefresh.set(s, Date.now()));
         toRefresh.forEach(s => {
             if (!deadSymbols.has(s) && recentlySeen.has(s)) {
-                enqueueSymbols([s]);
+                enqueueSymbols([s], null, true);
             }
         });
         if (!queueDraining) drainFetchQueue();
