@@ -65,7 +65,7 @@
 
     function injectBlankPlaceholder(editor) {
         if (isTextarea(editor)) {
-            editor.value = BLANK_PLACEHOLDER;
+            editor.value += BLANK_PLACEHOLDER;
         } else {
             // Rich editor (ProseMirror): focus, place caret at end, insert as HTML.
             editor.focus();
@@ -90,8 +90,9 @@
         const text = getContent(editor);
         if (isSingleSticker(text)) return;
 
+        const isEmpty = text.trim().length === 0;   // 完全真空（无文字无引用），而非剥除引用后
         const len = calculateEffectiveLength(text);
-        if (len === 0) {
+        if (isEmpty) {
             // Nothing typed at all: emit an invisible placeholder
             injectBlankPlaceholder(editor);
         } else if (len < 4) {
