@@ -28,6 +28,27 @@ node stock-price/run-tests.js "AAPL TSLA $BTC 9020.T"
 
 **安装：** [`stock-price-tampermonkey.user.js`](https://github.com/lynkas/uscardforum-userscripts/raw/main/stock-price/stock-price-tampermonkey.user.js)
 
+### 自定义黑名单（可选）
+
+脚本默认从[仓库的 blacklist.json](./stock-price/blacklist.json) 拉取排除列表，开箱即用。想自定义：
+
+1. 复制 [`blacklist.json`](./stock-price/blacklist.json) 内容
+2. 在自己的 GitHub 建 Gist，粘贴进去（公开）
+3. 点 Gist 的 Raw → 复制 `gist.githubusercontent.com` 链接
+4. 论坛页面点 Tampermonkey 扩展图标 →「⚙️ 设置黑名单同步链接…」→ 粘贴
+
+支持字段（全部可选，出现的覆盖默认值）：
+
+```json
+{
+  "excludeCodes":   ["不想识别的代码"],
+  "excludePhrases": ["不识别的短语"],
+  "aliases":        { "论坛写法": "Yahoo代码" }
+}
+```
+
+断网时自动回退到脚本内置列表。菜单「🔄 立即重新同步黑名单」可强制刷新。菜单「📋 查看当前生效黑名单」可打印当前生效列表到控制台。
+
 ### [clown-to-yawn](./clown-to-yawn) — 表情替换 🤡→🥱
 
 把论坛帖子反应中的 🤡（clown_face）表情自动替换为 🥱（yawning_face）。

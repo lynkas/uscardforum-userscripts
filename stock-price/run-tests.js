@@ -10,57 +10,26 @@ const scriptSrc = fs.readFileSync(
     'utf8'
 );
 
-// ── Extract config blocks from script source ───────────────────────────────
-function extractSet(src, varName) {
-    const re = new RegExp(`${varName}\\s*=\\s*new Set\\(\\s*\\[([^\\]]*)\\]\\s*\\)`, 's');
-    const m = src.match(re);
-    if (!m) throw new Error(`Cannot find ${varName} in script`);
-    const items = m[1]
-        .split(',')
-        .map(s => s.replace(/\/\/.*/, '').trim().replace(/^['"]|['"]$/g, ''))
-        .filter(s => s && !s.startsWith('//'));
-    return new Set(items);
+// ── Load config from blacklist.json (JSONC — strip comments) ──────────────
+function stripJsonc(text) {
+    return text
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/(^|[^:])\/\/.*$/gm, '$1')
+        .replace(/,\s*([}\]])/g, '$1');
 }
+const configRaw = fs.readFileSync(path.join(__dirname, 'blacklist.json'), 'utf8');
+const CONFIG = JSON.parse(stripJsonc(configRaw));
 
-function extractArray(src, varName) {
-    const re = new RegExp(`${varName}\\s*=\\s*\\[([^\\]]*)\\]`, 's');
-    const m = src.match(re);
-    if (!m) throw new Error(`Cannot find ${varName} in script`);
-    const items = m[1]
-        .split(',')
-        .map(s => s.trim().replace(/^['"]|['"]$/g, ''))
-        .filter(Boolean);
-    return items;
-}
+const EXCLUDE_CODES = new Set(CONFIG.excludeCodes);
+const EXCLUDE_PHRASES = CONFIG.excludePhrases;
+const SYMBOL_ALIASES = CONFIG.aliases;
+const CRYPTO_CODES = new Set(CONFIG.cryptoCodes);
+const FIAT_CODES = new Set(CONFIG.fiatCodes);
+const FUTURES_CODES = new Set(CONFIG.futuresCodes);
+const SHORT_CODE_WHITELIST = new Set(CONFIG.shortCodeWhitelist);
+const COMMON_WORDS = new Set(CONFIG.commonWords);
 
-function extractObject(src, varName) {
-    const re = new RegExp(`${varName}\\s*=\\s*\\{([^}]*)\\}`, 's');
-    const m = src.match(re);
-    if (!m) throw new Error(`Cannot find ${varName} in script`);
-    const obj = {};
-    const pairs = m[1].split(',');
-    for (const pair of pairs) {
-        const colonIdx = pair.indexOf(':');
-        if (colonIdx === -1) continue;
-        const key = pair.slice(0, colonIdx).trim().replace(/^['"]|['"]$/g, '');
-        const val = pair.slice(colonIdx + 1).trim().replace(/^['"]|['"]$/g, '');
-        if (key) obj[key] = val;
-    }
-    return obj;
-}
-
-// Extract all configuration
-const EXCLUDE_CODES = extractSet(scriptSrc, 'EXCLUDE_CODES');
-const EXCLUDE_PHRASES = extractArray(scriptSrc, 'EXCLUDE_PHRASES')
-    .filter(p => !p.startsWith('//'));
-const SYMBOL_ALIASES = extractObject(scriptSrc, 'SYMBOL_ALIASES');
-const CRYPTO_CODES = extractSet(scriptSrc, 'CRYPTO_CODES');
-const FIAT_CODES = extractSet(scriptSrc, 'FIAT_CODES');
-const FUTURES_CODES = extractSet(scriptSrc, 'FUTURES_CODES');
-const COMMON_WORDS = extractSet(scriptSrc, 'COMMON_WORDS');
-const SHORT_CODE_WHITELIST = extractSet(scriptSrc, 'SHORT_CODE_WHITELIST');
-
-// GRAMMAR_WORDS is inside extractStockCodes, handle specially
+// GRAMMAR_WORDS stays hardcoded in .user.js — extract via regex
 const grammarRe = /GRAMMAR_WORDS\s*=\s*new Set\(([\s\S]*?)\);/;
 const grammarM = scriptSrc.match(grammarRe);
 if (!grammarM) throw new Error('Cannot find GRAMMAR_WORDS in script');
@@ -76,13 +45,14 @@ const GRAMMAR_WORDS = new Set(
 
 function classifyParagraph(para) {
     if (/[^\x00-\x7F]/.test(para)) return 'chinese';
-    const words = [...para.matchAll(/[A-Za-z']+/g)].map(m => m[0].toUpperCase());
+    const words = [...para.matchAll(/[A-Za-z.']+/g)].map(m => m[0].toUpperCase());
     if (words.some(w => GRAMMAR_WORDS.has(w))) return 'prose';
     if (words.length > 10) return 'prose';
     return 'codelist';
 }
 
 function isTickerLike(word) {
+    if (word.length >= 3 && !COMMON_WORDS.has(word.toUpperCase())) return true;
     if (word.length >= 2 && word === word.toUpperCase()) return true;
     if (word.includes('.')) return true;
     const upper = word.toUpperCase();
@@ -93,9 +63,11 @@ function isTickerLike(word) {
 }
 
 function isAcceptedCode(code) {
+    if (SHORT_CODE_WHITELIST.has(code) || SYMBOL_ALIASES[code] || FUTURES_CODES.has(code)) return true;
+    const dotIdx = code.indexOf('.');
+    if (dotIdx >= 0 && code.length - dotIdx - 1 < 2) return false;
     if (code.length < 2) return false;
-    return code.length >= 3 || SHORT_CODE_WHITELIST.has(code)
-        || SYMBOL_ALIASES[code] || FUTURES_CODES.has(code);
+    return code.length >= 3;
 }
 
 function groupParagraphs(text) {
@@ -107,7 +79,7 @@ function groupParagraphs(text) {
         const para = paragraphs[i];
         const type = classifyParagraph(para);
 
-        if (type === 'chinese') {
+        if (type === 'chinese' || para === '') {
             groups.push({ type, text: para, offset });
             offset += para.length + 1;
             i++;
@@ -135,7 +107,8 @@ const RE_EXACT = /\$([A-Za-z0-9.\-=^]*[A-Za-z0-9])/g;
 function collectExactCodes(text) {
     const codes = new Set();
     for (const m of text.matchAll(RE_EXACT)) {
-        codes.add(m[1].toUpperCase());
+        const code = m[1].toUpperCase();
+        if (/[A-Z]/.test(code)) codes.add(code);
     }
     return codes;
 }
@@ -164,7 +137,7 @@ function collectDotCodes(text, offset) {
     return { codes, zones };
 }
 
-const RE_FOREX = /(?<![A-Za-z\d])([A-Za-z]{6})(=?([A-Za-z]))?(?![A-Za-z\d])/g;
+const RE_FOREX = /(?<![A-Za-z\d])([A-Za-z]{6})(?![A-Za-z])(=?([A-Za-z]))?(?![A-Za-z\d])/g;
 
 function collectForexPairs(text, offset) {
     const codes = new Set();
@@ -181,7 +154,7 @@ function collectForexPairs(text, offset) {
 
 function buildGrammarZones(text, offset) {
     const zones = [];
-    for (const m of text.matchAll(/[A-Za-z']+(?:[^A-Za-z'\n]+[A-Za-z']+)+/g)) {
+    for (const m of text.matchAll(/[A-Za-z']+(?:[^A-Za-z'\n\u4e00-\u9fff\u3040-\u309f\uac00-\ud7af]+[A-Za-z']+)+/g)) {
         const words = m[0].split(/[^A-Za-z']+/).filter(Boolean).map(w => w.toUpperCase());
         if (words.length >= 3 && words.some(w => GRAMMAR_WORDS.has(w))) {
             zones.push([offset + m.index, offset + m.index + m[0].length]);
@@ -208,7 +181,7 @@ function buildPhraseZones(text, offset) {
     return zones;
 }
 
-const RE_STANDALONE = /(?<![A-Za-z\d'])([A-Za-z]{1,5}(?:\.[A-Za-z])?)(?![A-Za-z\d])/g;
+const RE_STANDALONE = /(?<![A-Za-z\d'])([A-Za-z]{1,5}(?:\.[A-Za-z])?)(?![A-Za-z\d:])/g;
 
 function collectStandalone(text, offset, zones) {
     const codes = new Set();
@@ -235,7 +208,7 @@ function extractStockCodes(container) {
         if (group.type === 'prose') continue;
 
         if (group.type === 'codelist') {
-            const words = [...group.text.matchAll(/[A-Za-z]+/g)].map(m => m[0]);
+            const words = [...group.text.matchAll(/[A-Za-z0-9.]+/g)].map(m => m[0]);
             if (!words.some(isTickerLike)) continue;
         }
 
@@ -313,7 +286,7 @@ function formatChange(val) {
 function formatPriceText(symbol, priceData) {
     const isFiat = FIAT_CODES.has(symbol);
     if (isFiat) {
-        return `($1=${symbol}${priceData.price.toFixed(2)} ${formatChange(priceData.change)}%)`;
+        return `(1=${symbol}${priceData.price.toFixed(2)} ${formatChange(priceData.change)}%)`;
     }
     const tp = priceData.tradingPeriod;
     const session = getMarketSession(tp, priceData._nowS ?? Date.now() / 1000);
@@ -371,16 +344,13 @@ function runSuite(name, tests, fn) {
 
     for (const test of tests) {
         let result;
-        let ok;
         try {
             result = fn(test);
-            ok = true;
         } catch (e) {
-            ok = false;
             result = `ERROR: ${e.message}`;
         }
 
-        if (ok) {
+        if (result === null) {
             passed++;
             console.log(`  PASS  ${test.name}`);
         } else {

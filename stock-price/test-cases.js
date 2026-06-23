@@ -107,6 +107,30 @@ extractionTests.push({
     expected: [],
 });
 
+extractionTests.push({
+    name: 'edit: 冒号后缀不提取（其余独立词照常）',
+    input: 'edit: added more info',
+    expected: ['ADDED', 'INFO'],
+});
+
+extractionTests.push({
+    name: 'update: 冒号后缀不提取（其余独立词照常）',
+    input: 'update: fixed the bug',
+    expected: ['FIXED'],
+});
+
+extractionTests.push({
+    name: '冒号后缀在中国段中也不提取',
+    input: 'edit: 补充说明一下NVDA涨了',
+    expected: ['NVDA'],
+});
+
+extractionTests.push({
+    name: 'note: 冒号后缀不提取但独立NOTE提取',
+    input: 'note: something\nNOTE',
+    expected: ['NOTE'],
+});
+
 // ── 白名单和特殊代码 ──
 
 extractionTests.push({
@@ -116,9 +140,69 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    name: '2字母白名单代码 CW',
+    input: 'HON(229.01 +0.17%) HWM(277.66 -1.97%) CW ATRO(80.56 +0.62%)',
+    expected: ['ATRO', 'CW', 'HON', 'HWM'],
+});
+
+extractionTests.push({
     name: '期货短代码加入白名单后独立匹配',
     input: 'NQ ES',
     expected: ['NQ', 'ES'],
+});
+
+extractionTests.push({
+    name: 'api agi 被 excludeCodes 排除',
+    input: 'api agi',
+    expected: [],
+});
+
+extractionTests.push({
+    name: 'API AGI 大小写也排除',
+    input: 'API AGI',
+    expected: [],
+});
+
+extractionTests.push({
+    name: 'CUE 被 excludeCodes 排除',
+    input: 'cue CUE',
+    expected: [],
+});
+
+extractionTests.push({
+    name: 'BRO CPI 被 excludeCodes 排除',
+    input: 'bro CPI',
+    expected: [],
+});
+
+extractionTests.push({
+    name: 'BRO CPI 大小写也排除',
+    input: 'BRO cpi',
+    expected: [],
+});
+
+extractionTests.push({
+    name: 'WELL DTE 被 excludeCodes 排除',
+    input: 'well dte',
+    expected: [],
+});
+
+extractionTests.push({
+    name: 'SIZE NASA ELON 被 excludeCodes 排除',
+    input: 'size nasa elon',
+    expected: [],
+});
+
+extractionTests.push({
+    name: '颜文字中的单字母不提取 — O被ㄒ包围',
+    input: 'ㄒOㄒ',
+    expected: [],
+});
+
+extractionTests.push({
+    name: '颜文字中的单字母不提取 — B被包围',
+    input: 'ㄒBㄒ',
+    expected: [],
 });
 
 extractionTests.push({
@@ -385,6 +469,116 @@ extractionTests.push({
     name: '外汇对在代码列表段落',
     input: 'NVDA\nUSDCNY\nTSLA\nEURJPY',
     expected: ['NVDA', 'USDCNY', 'TSLA', 'EURJPY'],
+});
+
+// ── 中文语境混合代码 ──
+
+extractionTests.push({
+    name: '中文段 — 混合美股中股台股港股加密外汇期货别名点码',
+    input: '最近持仓$SPX涨了很多，NVDA和TSLA继续持有，A股000001.SS和600519.SS也在观望，台股2330.TW港股0700.HK不错，BTC反弹USDJPY见顶ES做多BRK.B和TD.TO加SHOP.TO',
+    expected: ['000001.SS', '0700.HK', '2330.TW', '600519.SS', 'BRK.B', 'BTC', 'ES', 'NVDA', 'SHOP.TO', 'SPX', 'TD.TO', 'TSLA', 'USDJPY'],
+});
+
+extractionTests.push({
+    name: '中文段 — 混合大小写代码仍应提取',
+    input: '今天nvda跌了但Tsla涨了aapl也涨了',
+    expected: ['AAPL', 'NVDA', 'TSLA'],
+});
+
+extractionTests.push({
+    name: '中文段 — $EXACT与非$代码混合',
+    input: '$NVDA涨了TSLA跌了$AAPL反弹',
+    expected: ['AAPL', 'NVDA', 'TSLA'],
+});
+
+extractionTests.push({
+    name: '中文段 — $EXACT期货期权代码',
+    input: '期货方面$NQ=F走强$ES=F回调$CL=F反弹',
+    expected: ['CL=F', 'ES=F', 'NQ=F'],
+});
+
+extractionTests.push({
+    name: '中文段 — 加拿大点码TO后缀',
+    input: '加拿大银行股TD.TO和SHOP.TO以及CNR.TO都还行',
+    expected: ['CNR.TO', 'SHOP.TO', 'TD.TO'],
+});
+
+extractionTests.push({
+    name: '中文段 — 加密货币代码',
+    input: '币圈今天BTC暴跌ETH跟跌SOL还算稳DOGE飞天',
+    expected: ['BTC', 'DOGE', 'ETH', 'SOL'],
+});
+
+extractionTests.push({
+    name: '中文段 — 外汇对和法币混合',
+    input: 'USDCNY创近期新低CADCNY也在跌EURJPY倒是涨了CNY强EUR弱JPY更弱',
+    expected: ['CADCNY', 'CNY', 'EUR', 'EURJPY', 'JPY', 'USDCNY'],
+});
+
+// ── 英文代码列表段落 ──
+
+extractionTests.push({
+    name: '纯代码列表 — 美股多行',
+    input: 'NVDA\nTSLA\nAAPL\nAMD\nMSFT',
+    expected: ['AAPL', 'AMD', 'MSFT', 'NVDA', 'TSLA'],
+});
+
+extractionTests.push({
+    name: '纯代码列表 — 数字和字母点码多行',
+    input: '2330.TW\nTD.TO\n000001.SS\n0700.HK\n005930.KS',
+    expected: ['000001.SS', '005930.KS', '0700.HK', '2330.TW', 'TD.TO'],
+});
+
+extractionTests.push({
+    name: '纯代码列表 — 混合大小写全部提取',
+    input: 'nvda\nTsla\naapl\nbrk.b',
+    expected: ['AAPL', 'BRK.B', 'NVDA', 'TSLA'],
+});
+
+extractionTests.push({
+    name: '纯代码列表 — 外汇对和法币多行',
+    input: 'USDCNY\nCADCNY\nEURJPY\nCNY\nEUR',
+    expected: ['CADCNY', 'CNY', 'EUR', 'EURJPY', 'USDCNY'],
+});
+
+extractionTests.push({
+    name: '纯代码列表 — 加密货币多行',
+    input: 'BTC\nETH\nSOL\nDOGE',
+    expected: ['BTC', 'DOGE', 'ETH', 'SOL'],
+});
+
+// ── 英文散文 — 仅$EXACT提取 ──
+
+extractionTests.push({
+    name: '英文散文 — 独立代码不提取',
+    input: 'I bought some NVDA and TSLA today',
+    expected: [],
+});
+
+extractionTests.push({
+    name: '英文散文 — $EXACT提取',
+    input: 'I want to sell $NVDA and buy $TSLA',
+    expected: ['NVDA', 'TSLA'],
+});
+
+extractionTests.push({
+    name: '英文散文 — 混合仅$EXACT提取独立不提取',
+    input: 'My portfolio has NVDA TSLA and I added $AAPL',
+    expected: ['AAPL'],
+});
+
+// ── 边界情况 ──
+
+extractionTests.push({
+    name: '中文段 — dram小写代码提取(非排除词)',
+    input: 'dram 8% :yaoming:',
+    expected: ['DRAM'],
+});
+
+extractionTests.push({
+    name: '中文段 — 含数字和excludePhrases短语（basis孤立不触发cost basis排除）',
+    input: '价格$100以上，买了NVDA和TSLA，成本basis',
+    expected: ['BASIS', 'NVDA', 'TSLA'],
 });
 
 // ============================================================================
@@ -1049,9 +1243,9 @@ isTickerLikeTests.push({
 });
 
 isTickerLikeTests.push({
-    name: '混合大小写 → false',
+    name: '混合大小写3字母以上 → true',
     input: 'Nvda',
-    expected: false,
+    expected: true,
 });
 
 isTickerLikeTests.push({
@@ -1073,9 +1267,9 @@ isTickerLikeTests.push({
 });
 
 isTickerLikeTests.push({
-    name: '白名单单字母 → true',
+    name: '单字母不在白名单 → false',
     input: 'C',
-    expected: true,
+    expected: false,
 });
 
 isTickerLikeTests.push({
@@ -1122,9 +1316,9 @@ isAcceptedCodeTests.push({
 });
 
 isAcceptedCodeTests.push({
-    name: '白名单单字母 → true',
+    name: '单字母不在白名单 → false',
     input: 'C',
-    expected: true,
+    expected: false,
 });
 
 isAcceptedCodeTests.push({
@@ -1227,6 +1421,7 @@ groupParagraphsTests.push({
     name: '多空行各自成组',
     input: '\n\n',
     expected: [
+        { type: 'codelist', text: '' },
         { type: 'codelist', text: '' },
         { type: 'codelist', text: '' },
     ],

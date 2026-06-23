@@ -1,12 +1,17 @@
 // ==UserScript==
 // @name         USCardForum Stock Price
 // @namespace    http://tampermonkey.net/
-// @version      0.3.2
+// @version      0.4.1
 // @description  Show stock prices inline on USCardForum investment category
 // @match        https://www.uscardforum.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_registerMenuCommand
 // @connect      query1.finance.yahoo.com
+// @connect      raw.githubusercontent.com
+// @connect      *
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -14,68 +19,357 @@
     'use strict';
 
     // ═══════════════════════════════════════════════════════════════════════
-    // 排除列表 —— 在这里添加不想匹配的代码（不区分大小写）
+    // 以下配置常量从远程 blacklist.json 加载（见 applyRemoteData）
+    // 本地初始化为空，首次联网拉取后由 GM 缓存持久化
     // ═══════════════════════════════════════════════════════════════════════
-    const EXCLUDE_CODES = new Set([
-        'IPO','PUT','CALL','G','ZS','B','WTF','CAPEX','TLDR','BUY',
-        'ARROW','YTD','OIL','YEAR','BEAT','HOLD','TACO','OPUS','GPT','PAY','FLAT','GAIN','LEAD','IRS','EST','ROTH','LOW','FILL',
-        'JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC','PDT','INDEX','APP',
-        // 'AI', 'ON', 'A',  ← 示例，取消注释即可排除
-    ]);
+    const EXCLUDE_CODES = new Set();
+    const EXCLUDE_PHRASES = [];
+    const SYMBOL_ALIASES = {};
+    const CRYPTO_CODES = new Set();
+    const FIAT_CODES = new Set();
+    const FUTURES_CODES = new Set();
+    const SHORT_CODE_WHITELIST = new Set();
+    const COMMON_WORDS = new Set();
 
-    // 排除短语 —— 这些连续词组中的每个词都不会被单独匹配为股票代码
-    const EXCLUDE_PHRASES = [
-        'cost basis',
-        'stop loss',
-        'take profit',
-        'debit card',
-        'credit card',
-        'vice versa',
-        'crude oil',
-        'long term',
-        'short term',
-        'negative cor',
-        'positive cor',
-    ];
 
-    // 别名映射 —— 论坛写法 → Yahoo Finance 实际代码
-    const SYMBOL_ALIASES = {
-        'BRKB': 'BRK-B',
-        'BRKA': 'BRK-A',
-        'BRK.B': 'BRK-B',
-        'BRK.A': 'BRK-A',
-        'SPX': '^GSPC',
-        'WTI': 'CL=F',
-    };
-
-    // 加密货币代码 → Yahoo Finance 会自动加 -USD 后缀查询
-    const CRYPTO_CODES = new Set([
-        'BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'USDC', 'DOGE',
-        'ADA', 'TRX', 'AVAX', 'DOT', 'LINK', 'MATIC', 'SHIB', 'LTC',
-        'UNI', 'ATOM', 'XLM', 'ETC', 'BCH', 'FIL', 'APT', 'NEAR',
-        'AAVE', 'ARB', 'OP',
-    ]);
-
-    // 法币代码 → Yahoo Finance 用 CURRENCY=X 格式，显示为 1 USD 兑换价
-    const FIAT_CODES = new Set([
-        'USD', 'CNY', 'EUR', 'GBP', 'JPY', 'KRW', 'CAD', 'AUD', 'CHF', 'HKD',
-        'TWD', 'SGD', 'INR', 'MXN', 'BRL', 'THB', 'MYR', 'PHP', 'VND',
-        'NZD', 'SEK', 'DKK', 'ZAR', 'RUB', 'TRY', 'PLN', 'CZK',
-        'ILS', 'AED', 'SAR', 'CNH',
-    ]);
-
-    // 期货代码 → Yahoo Finance 用 =F 后缀查询
-    const FUTURES_CODES = new Set([
-        // 指数期货
-        'ES', 'NQ', 'YM', 'RTY', 'VIX',
-        // 商品期货
-        'GC', 'SI', 'HG', 'PL', 'PA',  // 贵金属: 金 银 铜 铂 钯
-        'CL', 'NG', 'RB', 'HO', 'BZ',  // 能源: 原油 天然气 汽油 取暖油 布油
-        'ZB', 'ZN', 'ZF', 'ZT',        // 国债: 30Y 10Y 5Y 2Y
-        'ZW', 'ZC', 'ZS', 'KC', 'SB',  // 农产品: 小麦 玉米 大豆 咖啡 糖
-        'CT', 'LBS',                    // 棉花 木材
-    ]);
     // ═══════════════════════════════════════════════════════════════════════
+    // Toast notifications — replaces blocking alert()
+    // ═══════════════════════════════════════════════════════════════════════
+    GM_addStyle(`
+        #sp-toast-container {
+            position: fixed;
+            bottom: 16px;
+            right: 16px;
+            z-index: 2147483647;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+        }
+        .sp-toast {
+            pointer-events: auto;
+            max-width: 360px;
+            min-width: 220px;
+            padding: 10px 30px 10px 14px;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 13px;
+            line-height: 1.45;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+            opacity: 0;
+            transform: translateX(20px);
+            transition: opacity .25s ease, transform .25s ease;
+            position: relative;
+            word-break: break-word;
+            font-family: -apple-system, system-ui, sans-serif;
+        }
+        .sp-toast.sp-toast-show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        .sp-toast-success { background: #16a34a; }
+        .sp-toast-error   { background: #dc2626; }
+        .sp-toast-info    { background: #1f2937; }
+        .sp-toast-close {
+            position: absolute;
+            top: 5px;
+            right: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            opacity: 0.7;
+            user-select: none;
+        }
+        .sp-toast-close:hover { opacity: 1; }
+        .sp-toast-url {
+            display: block;
+            margin-top: 6px;
+            padding: 4px 6px;
+            background: rgba(0,0,0,0.28);
+            border-radius: 4px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px;
+            word-break: break-all;
+            cursor: pointer;
+            user-select: all;
+        }
+        .sp-toast-text { white-space: pre-line; }
+    `);
+
+    let _toastContainer = null;
+    function _getToastContainer() {
+        if (_toastContainer && _toastContainer.isConnected) return _toastContainer;
+        _toastContainer = document.createElement('div');
+        _toastContainer.id = 'sp-toast-container';
+        document.body.appendChild(_toastContainer);
+        return _toastContainer;
+    }
+
+    function showToast(msg, type, duration, opts) {
+        type = type || 'info';
+        duration = duration || 5000;
+        opts = opts || null;
+        const container = _getToastContainer();
+        const toast = document.createElement('div');
+        toast.className = 'sp-toast sp-toast-' + type;
+        const text = document.createElement('span');
+        text.className = 'sp-toast-text';
+        text.textContent = msg;
+        const closeBtn = document.createElement('span');
+        closeBtn.className = 'sp-toast-close';
+        closeBtn.textContent = '×';
+        toast.appendChild(text);
+        if (opts && opts.url) {
+            const urlEl = document.createElement('code');
+            urlEl.className = 'sp-toast-url';
+            urlEl.textContent = opts.url;
+            urlEl.title = '点击复制链接';
+            urlEl.onclick = function () {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(opts.url).then(
+                        function () { showToast('链接已复制', 'success', 1500); },
+                        function () { _selectEl(urlEl); }
+                    );
+                } else {
+                    _selectEl(urlEl);
+                }
+            };
+            toast.appendChild(urlEl);
+        }
+        toast.appendChild(closeBtn);
+        container.appendChild(toast);
+        requestAnimationFrame(() => toast.classList.add('sp-toast-show'));
+        const dismiss = () => {
+            toast.classList.remove('sp-toast-show');
+            setTimeout(() => { if (toast.isConnected) toast.remove(); }, 300);
+        };
+        const timer = setTimeout(dismiss, duration);
+        closeBtn.onclick = () => { clearTimeout(timer); dismiss(); };
+    }
+
+    function _selectEl(el) {
+        const range = document.createRange();
+        range.selectNode(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+
+    // ── Per-URL notification counter (anti-spam for auto background failures) ──
+    const GMK_NOTIFY = 'sp_notify_counts';
+    const NOTIFY_CAP = 2;
+
+    function _getNotifyCounts() {
+        const v = GM_getValue(GMK_NOTIFY, null);
+        if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+        return {};
+    }
+    function _setNotifyCount(url, n) {
+        const counts = _getNotifyCounts();
+        counts[url] = n;
+        GM_setValue(GMK_NOTIFY, counts);
+    }
+    function shouldNotifyForUrl(url) {
+        const n = _getNotifyCounts()[url] || 0;
+        if (n >= NOTIFY_CAP) return false;
+        _setNotifyCount(url, n + 1);
+        return true;
+    }
+    function resetNotifyForUrl(url) {
+        _setNotifyCount(url, 0);
+    }
+
+    // ── Unified sync-result handler ──
+    function _syncSuccessMsg(r) {
+        return '✓ 黑名单同步成功: 代码 ' + r.counts.codes + ' / 短语 ' + r.counts.phrases + ' / 别名 ' + r.counts.aliases;
+    }
+    function _syncFailMsg(r) {
+        return '✗ 黑名单同步失败: ' + r.msg + '\n（已保留旧缓存）';
+    }
+    function onSyncResult(r, isManual) {
+        const url = getBlacklistUrl();
+        if (r.ok) {
+            resetNotifyForUrl(url);   // success → reset this URL's failure count
+            showToast(_syncSuccessMsg(r), 'success', isManual ? 5000 : 3000);
+            return;
+        }
+        if (isManual) {
+            showToast(_syncFailMsg(r), 'error', 6000);
+        } else if (shouldNotifyForUrl(url)) {
+            showToast(_syncFailMsg(r), 'error', 6000);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Remote blacklist — default uses repo JSON, user can swap to their gist
+    // ═══════════════════════════════════════════════════════════════════════
+    const DEFAULT_BLACKLIST_URL =
+        'https://raw.githubusercontent.com/lynkas/uscardforum-userscripts/main/stock-price/blacklist.json';
+    const GMK_URL = 'sp_blacklist_url';
+    const GMK_CACHE = 'sp_blacklist_cache';
+    const SCRIPT_VERSION = '0.4.1';   // bump together with @version to force one-time blacklist refetch
+    const GMK_VER = 'sp_last_script_ver';
+
+    // Populate all config constants from remote data (single source = blacklist.json).
+    // Clears each list first, then fills from whichever fields the JSON provides.
+    function applyRemoteData(data) {
+        EXCLUDE_CODES.clear();
+        EXCLUDE_PHRASES.length = 0;
+        for (const k of Object.keys(SYMBOL_ALIASES)) delete SYMBOL_ALIASES[k];
+        CRYPTO_CODES.clear();
+        FIAT_CODES.clear();
+        FUTURES_CODES.clear();
+        SHORT_CODE_WHITELIST.clear();
+        COMMON_WORDS.clear();
+
+        if (!data || typeof data !== 'object') return;
+        if (Array.isArray(data.excludeCodes)) {
+            data.excludeCodes.forEach(c => {
+                if (typeof c === 'string') EXCLUDE_CODES.add(c.toUpperCase());
+            });
+        }
+        if (Array.isArray(data.excludePhrases)) {
+            data.excludePhrases.forEach(p => {
+                if (typeof p === 'string') EXCLUDE_PHRASES.push(p);
+            });
+        }
+        if (data.aliases && typeof data.aliases === 'object' && !Array.isArray(data.aliases)) {
+            for (const [k, v] of Object.entries(data.aliases)) {
+                if (typeof v === 'string') SYMBOL_ALIASES[String(k).toUpperCase()] = v;
+            }
+        }
+        if (Array.isArray(data.cryptoCodes)) {
+            data.cryptoCodes.forEach(c => {
+                if (typeof c === 'string') CRYPTO_CODES.add(c.toUpperCase());
+            });
+        }
+        if (Array.isArray(data.fiatCodes)) {
+            data.fiatCodes.forEach(c => {
+                if (typeof c === 'string') FIAT_CODES.add(c.toUpperCase());
+            });
+        }
+        if (Array.isArray(data.futuresCodes)) {
+            data.futuresCodes.forEach(c => {
+                if (typeof c === 'string') FUTURES_CODES.add(c.toUpperCase());
+            });
+        }
+        if (Array.isArray(data.shortCodeWhitelist)) {
+            data.shortCodeWhitelist.forEach(c => {
+                if (typeof c === 'string') SHORT_CODE_WHITELIST.add(c.toUpperCase());
+            });
+        }
+        if (Array.isArray(data.commonWords)) {
+            data.commonWords.forEach(c => {
+                if (typeof c === 'string') COMMON_WORDS.add(c.toUpperCase());
+            });
+        }
+    }
+
+    // Strip JSONC comments (// line and /* block */) and trailing commas
+    // before JSON.parse. Strings in this file never contain // or /* so safe.
+    function stripJsonc(text) {
+        return text
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/(^|[^:])\/\/.*$/gm, '$1')
+            .replace(/,\s*([}\]])/g, '$1');
+    }
+
+    function getBlacklistUrl() {
+        return GM_getValue(GMK_URL, DEFAULT_BLACKLIST_URL);
+    }
+
+    async function loadRemoteBlacklist(force) {
+        const url = getBlacklistUrl();
+        if (!url) return { ok: false, msg: '未配置 URL' };
+
+        try {
+            const resp = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url,
+                    timeout: 8000,
+                    onload: resolve,
+                    onerror: () => reject(new Error('网络错误')),
+                    ontimeout: () => reject(new Error('请求超时')),
+                    onabort: () => reject(new Error('请求中止')),
+                });
+            });
+            if (resp.status < 200 || resp.status >= 300) throw new Error('HTTP ' + resp.status);
+            const data = JSON.parse(stripJsonc(resp.responseText));
+            if (typeof data !== 'object' || data === null || Array.isArray(data))
+                throw new Error('JSON 不是对象');
+
+            GM_setValue(GMK_CACHE, data);
+            applyRemoteData(data);
+            console.log('[stock-price] 远程黑名单已加载:', {
+                codes: (data.excludeCodes || []).length,
+                phrases: (data.excludePhrases || []).length,
+                aliases: Object.keys(data.aliases || {}).length,
+            });
+            return {
+                ok: true,
+                counts: {
+                    codes: (data.excludeCodes || []).length,
+                    phrases: (data.excludePhrases || []).length,
+                    aliases: Object.keys(data.aliases || {}).length,
+                },
+            };
+        } catch (e) {
+            return { ok: false, msg: e.message };
+        }
+    }
+
+    const RE_URL = /^https:\/\/.+/i;
+
+    GM_registerMenuCommand('⚙️ 设置黑名单同步链接…', () => {
+        const cur = getBlacklistUrl();
+        const input = prompt(
+            '黑名单 JSON 的链接（需 HTTPS，返回 JSON）：\n\n' +
+            '支持任意能 GET 返回 JSON 的地址（GitHub raw、Gist raw、自建服务等）。\n\n' +
+            '留空恢复默认。',
+            cur
+        );
+        if (input === null) return;
+        const trimmed = input.trim();
+        if (trimmed === '') {
+        GM_setValue(GMK_URL, DEFAULT_BLACKLIST_URL);
+        resetNotifyForUrl(DEFAULT_BLACKLIST_URL);
+        showToast('已恢复默认链接，正在同步…', 'info', 3000);
+            loadRemoteBlacklist(true).then(function (r) { onSyncResult(r, true); });
+            return;
+        }
+        if (!RE_URL.test(trimmed)) {
+            showToast('✗ 链接格式不对\n需要 https:// 开头的地址', 'error', 6000);
+            return;
+        }
+        GM_setValue(GMK_URL, trimmed);
+        resetNotifyForUrl(trimmed);
+        loadRemoteBlacklist(true).then(function (r) { onSyncResult(r, true); });
+    });
+
+    GM_registerMenuCommand('🔄 立即重新同步黑名单', () => {
+        loadRemoteBlacklist(true).then(function (r) { onSyncResult(r, true); });
+    });
+
+    GM_registerMenuCommand('📋 查看当前生效黑名单', () => {
+        const url = getBlacklistUrl();
+        const cached = GM_getValue(GMK_CACHE, null);
+        console.group('[stock-price] 当前黑名单');
+        console.log('URL:', url);
+        console.log('缓存来源:', cached ? '远程' : '空（未加载远程配置）');
+        console.log('excludeCodes:', [...EXCLUDE_CODES]);
+        console.log('excludePhrases:', [...EXCLUDE_PHRASES]);
+        console.log('aliases:', { ...SYMBOL_ALIASES });
+        console.groupEnd();
+        showToast('已打印到控制台 (F12)\n来源: ' + (cached ? '远程缓存' : '空（未加载）'), 'info', 8000, { url: url });
+    });
+
+    GM_registerMenuCommand('🧹 清除黑名单缓存（测试）', () => {
+        GM_setValue(GMK_CACHE, null);
+        GM_setValue(GMK_VER, '');
+        console.log('[stock-price] cache cleared via menu');
+        alert('黑名单缓存已清除，刷新页面后会重新拉取');
+    });
 
     // ─── Task 1: Page Detection ───────────────────────────────────────────
 
@@ -119,45 +413,28 @@
     }
 
     function init() {
+        console.log('[stock-price] init(), isInvestmentCategory:', isInvestmentCategory());
         if (!isInvestmentCategory()) {
             if (initialized) stop();
             return;
         }
         if (initialized) return;
 
+    // ── Remote blacklist: apply cache synchronously; refetch on script-version change or cache miss ──
+    const _cached = GM_getValue(GMK_CACHE, null);
+    const _lastVer = GM_getValue(GMK_VER, '');
+    const _versionChanged = _lastVer !== SCRIPT_VERSION;
+    if (_cached) applyRemoteData(_cached);
+    const _needFetch = _versionChanged || !_cached;
+    if (_versionChanged) GM_setValue(GMK_VER, SCRIPT_VERSION);
+    if (_needFetch) {
+        loadRemoteBlacklist(_versionChanged).then(function (r) {
+            onSyncResult(r, false);
+            processNewPosts();   // first scan now that blacklist is populated
+        });
+    }
+
     // ─── Task 2: Stock Code Extraction ────────────────────────────────────
-
-    const COMMON_WORDS = new Set([
-      'THE','AND','FOR','ARE','BUT','NOT','YOU','ALL','CAN','HER','WAS','ONE',
-      'OUR','OUT','HAS','HIS','HOW','ITS','MAY','NEW','NOW','OLD','SEE','WAY',
-      'WHO','BOY','DID','GET','HIM','LET','SAY','SHE','TOO','USE','DAD','MOM',
-      'MAN','RUN','SET','TRY','ASK','MEN','RAN','OWN','CAME','COME','EACH',
-      'MAKE','LIKE','LONG','LOOK','MANY','SOME','THEM','THEN','THAN','THIS',
-      'THAT','WITH','HAVE','FROM','YOUR','THEY','BEEN','CALL','WILL','JUST',
-      'VERY','TAKE','ALSO','INTO','MORE','OVER','SUCH','AFTER','BACK','COULD',
-      'ONLY','COME','MADE','FIND','HERE','KNOW','LAST','DOWN','SIDE','BEEN',
-      'STILL','BEING','FIRST','ABOUT','OTHER','WHICH','THEIR','THERE','EVERY',
-      'WOULD','ABOVE','COULD','UNDER','THOSE','THESE','BEING','WHERE','WHEN',
-      'WHAT','YOUR','HOURS','DAYS','WEEK','BEST','MOST','GOOD','GREAT','NEED',
-      'HELP','WANT','THINK','GOING','RIGHT','THING','REALLY','ALREADY','BEFORE',
-      'AI',
-    ]);
-
-    const SHORT_CODE_WHITELIST = new Set([
-        // Single letter
-        'B', 'C', 'F', 'G', 'H', 'K', 'L', 'O', 'P', 'Q', 'R',
-        'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-        // Double letter
-        'AA', 'AI', 'AM', 'BA', 'BR', 'CA', 'CI', 'CV', 'DE', 'DU',
-        'EM', 'ET', 'FC', 'FL', 'GE', 'GM', 'GS', 'HP', 'IQ', 'IT',
-        'JO', 'KC', 'KO', 'LI', 'MA', 'MC', 'MR', 'MU', 'NU', 'NV',
-        'PG', 'PL', 'PM', 'QQ', 'SQ', 'ST', 'TM', 'UB', 'UI',
-        'UM', 'VM', 'WU',
-        // Futures 2-letter codes — resolved to =F by fetchPrice
-        'ES', 'NQ', 'YM', 'GC', 'SI', 'HG', 'PA', 'CL', 'NG',
-        'RB', 'HO', 'BZ', 'ZB', 'ZN', 'ZF', 'ZT', 'ZW', 'ZC',
-        'SB', 'CT',
-    ]);
 
     // Grammar words — indicate English prose, not stock codes
     const GRAMMAR_WORDS = new Set([
@@ -168,20 +445,21 @@
         'BELOW','BETWEEN','UNDER','OVER','AND','BUT','OR','NOR','NOT','SO',
         'YET','IF','THAN','THAT','THIS','IT','HE','SHE','WE','THEY','MY',
         'YOUR','HIS','HER','ITS','OUR','ME','HIM','US','THEM','WHAT','WHICH',
-        'WHO','WHEN','WHERE','HOW','WHY',
+        'WHO','WHEN','WHERE','HOW','I','WHY',
     ]);
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     function classifyParagraph(para) {
         if (/[^\x00-\x7F]/.test(para)) return 'chinese';
-        const words = [...para.matchAll(/[A-Za-z']+/g)].map(m => m[0].toUpperCase());
+        const words = [...para.matchAll(/[A-Za-z.']+/g)].map(m => m[0].toUpperCase());
         if (words.some(w => GRAMMAR_WORDS.has(w))) return 'prose';
         if (words.length > 10) return 'prose';
         return 'codelist';
     }
 
     function isTickerLike(word) {
+        if (word.length >= 3 && !COMMON_WORDS.has(word.toUpperCase())) return true;
         if (word.length >= 2 && word === word.toUpperCase()) return true;
         if (word.includes('.')) return true;
         const upper = word.toUpperCase();
@@ -192,9 +470,11 @@
     }
 
     function isAcceptedCode(code) {
+        if (SHORT_CODE_WHITELIST.has(code) || SYMBOL_ALIASES[code] || FUTURES_CODES.has(code)) return true;
+        const dotIdx = code.indexOf('.');
+        if (dotIdx >= 0 && code.length - dotIdx - 1 < 2) return false;
         if (code.length < 2) return false;
-        return code.length >= 3 || SHORT_CODE_WHITELIST.has(code)
-            || SYMBOL_ALIASES[code] || FUTURES_CODES.has(code);
+        return code.length >= 3;
     }
 
     function groupParagraphs(text) {
@@ -206,7 +486,7 @@
             const para = paragraphs[i];
             const type = classifyParagraph(para);
 
-            if (type === 'chinese') {
+            if (type === 'chinese' || para === '') {
                 groups.push({ type, text: para, offset });
                 offset += para.length + 1;
                 i++;
@@ -235,7 +515,8 @@
     function collectExactCodes(text) {
         const codes = new Set();
         for (const m of text.matchAll(RE_EXACT)) {
-            codes.add(m[1].toUpperCase());
+            const code = m[1].toUpperCase();
+            if (/[A-Z]/.test(code)) codes.add(code);
         }
         return codes;
     }
@@ -264,7 +545,7 @@
         return { codes, zones };
     }
 
-    const RE_FOREX = /(?<![A-Za-z\d])([A-Za-z]{6})(=?([A-Za-z]))?(?![A-Za-z\d])/g;
+    const RE_FOREX = /(?<![A-Za-z\d])([A-Za-z]{6})(?![A-Za-z])(=?([A-Za-z]))?(?![A-Za-z\d])/g;
 
     function collectForexPairs(text, offset) {
         const codes = new Set();
@@ -283,7 +564,7 @@
 
     function buildGrammarZones(text, offset) {
         const zones = [];
-        for (const m of text.matchAll(/[A-Za-z']+(?:[^A-Za-z'\n]+[A-Za-z']+)+/g)) {
+        for (const m of text.matchAll(/[A-Za-z']+(?:[^A-Za-z'\n\u4e00-\u9fff\u3040-\u309f\uac00-\ud7af]+[A-Za-z']+)+/g)) {
             const words = m[0].split(/[^A-Za-z']+/).filter(Boolean).map(w => w.toUpperCase());
             if (words.length >= 3 && words.some(w => GRAMMAR_WORDS.has(w))) {
                 zones.push([offset + m.index, offset + m.index + m[0].length]);
@@ -310,7 +591,7 @@
         return zones;
     }
 
-    const RE_STANDALONE = /(?<![A-Za-z\d'])([A-Za-z]{1,5}(?:\.[A-Za-z])?)(?![A-Za-z\d])/g;
+    const RE_STANDALONE = /(?<![A-Za-z\d'])([A-Za-z]{1,5}(?:\.[A-Za-z])?)(?![A-Za-z\d:])/g;
 
     function collectStandalone(text, offset, zones) {
         const codes = new Set();
@@ -337,7 +618,7 @@
             if (group.type === 'prose') continue; // prose: only $EXACT
 
             if (group.type === 'codelist') {
-                const words = [...group.text.matchAll(/[A-Za-z]+/g)].map(m => m[0]);
+                const words = [...group.text.matchAll(/[A-Za-z0-9.]+/g)].map(m => m[0]);
                 if (!words.some(isTickerLike)) continue;
             }
 
@@ -374,7 +655,86 @@
 
     const priceCache = new Map(); // symbol -> { data, timestamp }
     const CACHE_TTL = 60000; // 60 seconds
+    function symbolJitter(symbol) {
+        let hash = 0;
+        for (let i = 0; i < symbol.length; i++) {
+            hash = ((hash << 5) - hash) + symbol.charCodeAt(i);
+        }
+        return (Math.abs(hash) % 60001) - 30000;
+    }
     const pendingFetches = new Set(); // symbols currently being fetched
+    const symbolFetchQueue = [];
+    let queueDraining = false;
+    const queueCallbacks = [];
+
+    function updateSymbolSpans(symbol, priceData) {
+        const spans = document.querySelectorAll(`.sp-stock-price[data-sp-symbol="${symbol}"]`);
+        if (spans.length === 0) return;
+        const session = getMarketSession(priceData.tradingPeriod);
+        const isClosed = session === 'closed';
+        const changeClass = priceData.change > 0 ? 'sp-up' : priceData.change < 0 ? 'sp-down' : 'sp-flat';
+        const priceContent = buildPriceContent(symbol, priceData);
+        for (const span of spans) {
+            span.innerHTML = priceContent;
+            span.classList.remove('sp-up', 'sp-down', 'sp-flat');
+            span.classList.add(changeClass);
+            if (!FIAT_CODES.has(symbol)) {
+                span.classList.toggle('sp-closed', isClosed);
+            }
+        }
+    }
+
+    function enqueueSymbols(symbols, onBatchCb, force) {
+        const deduped = symbols.filter(s =>
+            !symbolFetchQueue.includes(s) &&
+            !pendingFetches.has(s) &&
+            !deadSymbols.has(s) &&
+            (force || !pagePriceMap.has(s))
+        );
+        if (deduped.length === 0) return;
+        symbolFetchQueue.push(...deduped);
+        if (onBatchCb) {
+            queueCallbacks.push({ symbols: new Set(deduped), onBatch: onBatchCb });
+        }
+        if (!queueDraining) drainFetchQueue();
+    }
+
+    async function drainFetchQueue() {
+        queueDraining = true;
+        let firstBatch = true;
+        while (symbolFetchQueue.length > 0) {
+            if (!firstBatch) {
+                log('queue delay', BATCH_INTERVAL, 'ms');
+                await new Promise(r => setTimeout(r, BATCH_INTERVAL));
+            }
+            firstBatch = false;
+            const batch = symbolFetchQueue.splice(0, BATCH_SIZE);
+            log('queue batch', batch.join(','));
+            batch.forEach(s => pendingFetches.add(s));
+            const results = await Promise.all(batch.map(s => fetchPrice(s)));
+            const fetched = [];
+            for (let i = 0; i < batch.length; i++) {
+                const symbol = batch[i];
+                const result = results[i];
+                pendingFetches.delete(symbol);
+                if (result?._retry) continue;
+                if (result) {
+                    priceCache.set(symbol, { data: result, timestamp: Date.now() });
+                    pagePriceMap.set(symbol, result);
+                    fetched.push(result);
+                } else {
+                    deadSymbols.add(symbol);
+                }
+            }
+            for (const r of fetched) updateSymbolSpans(r.symbol, r);
+            for (const cb of queueCallbacks) {
+                try { cb.onBatch(pagePriceMap); } catch (e) {}
+            }
+        }
+        queueDraining = false;
+        queueCallbacks.length = 0;
+    }
+
     let lastRequestTime = 0;
     let requestCount = 0;
     let requestLog = []; // { time, symbol, status, duration, gap }
@@ -413,7 +773,13 @@
                     if (requestLog.length > 200) requestLog.shift();
 
                     if (response.status === 429) {
-                        console.warn(`[stock-price] ⚠️ 429 RATE LIMITED ${symbol} (gap=${gap}ms, duration=${duration}ms, queue=${pendingFetches.size})`);
+                        console.log('[stock-price] ⚠ rate limited, retry later:', resolved);
+                        resolve({ _retry: true });
+                        return;
+                    }
+                    if (response.status === 404) {
+                        console.log('[stock-price] ✗ 404 not found:', resolved);
+                        pendingFetches.delete(resolved);
                         resolve(null);
                         return;
                     }
@@ -453,65 +819,45 @@
                         resolve(null);
                     }
                 },
-                onerror() {
-                    resolve(null);
-                },
-                ontimeout() {
-                    resolve(null);
-                }
+                onerror() { resolve({ _retry: true }); },
+                ontimeout() { resolve({ _retry: true }); }
             });
         });
     }
 
-    const BATCH_SIZE = 20;
+    const BATCH_SIZE = 30;
     const BATCH_INTERVAL = 5000;
 
     async function fetchPrices(symbols, onBatch) {
         const priceMap = new Map();
-        const toFetch = [];
+        const retrySymbols = new Set();
         const now = Date.now();
+        const toFetch = [];
 
-        // Check cache for each symbol, skip pending
         for (const symbol of symbols) {
             if (pendingFetches.has(symbol)) continue;
             const cached = priceCache.get(symbol);
-            if (cached && (now - cached.timestamp) < CACHE_TTL) {
+            if (cached && (now - cached.timestamp) < (CACHE_TTL + symbolJitter(symbol))) {
                 priceMap.set(symbol, cached.data);
             } else {
                 toFetch.push(symbol);
             }
         }
 
-        if (toFetch.length === 0) {
-            if (onBatch && priceMap.size > 0) onBatch(priceMap);
-            return priceMap;
-        }
+        if (onBatch && priceMap.size > 0) onBatch(priceMap);
+        if (toFetch.length === 0) return { priceMap, retrySymbols };
 
-        // Mark all as pending immediately to prevent duplicate requests
-        toFetch.forEach(s => pendingFetches.add(s));
+        enqueueSymbols(toFetch, onBatch);
 
-        // Fetch in batches of 20, with 5s between batches
-        for (let i = 0; i < toFetch.length; i += BATCH_SIZE) {
-            const batch = toFetch.slice(i, i + BATCH_SIZE);
-            console.log(`[stock-price] batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(toFetch.length / BATCH_SIZE)}: ${batch.join(', ')}`);
-            const results = await Promise.all(batch.map(s => fetchPrice(s)));
-            for (const result of results) {
-                if (result) {
-                    priceMap.set(result.symbol, result);
-                    priceCache.set(result.symbol, { data: result, timestamp: Date.now() });
-                }
-            }
-            // Remove from pending
-            batch.forEach(s => pendingFetches.delete(s));
-            // Notify caller after each batch so DOM can update progressively
-            if (onBatch && priceMap.size > 0) onBatch(priceMap);
-            if (i + BATCH_SIZE < toFetch.length) {
-                console.log(`[stock-price] waiting ${BATCH_INTERVAL}ms before next batch...`);
-                await new Promise(r => setTimeout(r, BATCH_INTERVAL));
+        for (const symbol of toFetch) {
+            if (pagePriceMap.has(symbol)) {
+                priceMap.set(symbol, pagePriceMap.get(symbol));
+            } else if (!deadSymbols.has(symbol)) {
+                retrySymbols.add(symbol);
             }
         }
 
-        return priceMap;
+        return { priceMap, retrySymbols };
     }
 
     // ─── Task 4: Styles ───────────────────────────────────────────────────
@@ -591,7 +937,7 @@
 
     function buildPriceContent(symbol, priceData) {
         if (FIAT_CODES.has(symbol)) {
-            return `($1=${symbol}${priceData.price.toFixed(2)} ${formatChange(priceData.change)}%)`;
+            return `(1=${symbol}${priceData.price.toFixed(2)} ${formatChange(priceData.change)}%)`;
         }
 
         const session = getMarketSession(priceData.tradingPeriod);
@@ -847,11 +1193,10 @@
             }
             // Re-scan live DOM — Discourse may have replaced .cooked elements
             // between extraction and fetch completion (bottom-to-top scrolling)
-            processNewPosts();
-        }).then(freshMap => {
-            // Mark codes that returned no data as dead
+            requestAnimationFrame(() => processNewPosts());
+        }).then(({ priceMap: freshMap, retrySymbols }) => {
             for (const code of codesToFetch) {
-                if (!freshMap.has(code)) {
+                if (!freshMap.has(code) && !retrySymbols.has(code)) {
                     deadSymbols.add(code);
                     log('processNewPosts: marking dead', code);
                 }
@@ -903,7 +1248,7 @@
         // Filter to needs-refresh, then take top 20 by recency
         const needsRefresh = allSymbols.filter(s => {
             const last = lastRefresh.get(s) || 0;
-            if (now - last < REFRESH_INTERVAL) return false;
+            if (now - last < (REFRESH_INTERVAL + symbolJitter(s))) return false;
             const priceData = pagePriceMap.get(s);
             const tp = priceData?.tradingPeriod;
             if (tp?.regular && tp.regular.end > nowS - 14400) {
@@ -921,49 +1266,13 @@
 
         log('refreshing', toRefresh.length, 'symbols:', toRefresh.join(','));
 
-        function updateSymbolSpans(symbol, priceData) {
-            const spans = document.querySelectorAll(`.sp-stock-price[data-sp-symbol="${symbol}"]`);
-            if (spans.length === 0) { log('no spans found for', symbol); return; }
-
-            const session = getMarketSession(priceData.tradingPeriod);
-            const isClosed = session === 'closed';
-            const changeClass = priceData.change > 0 ? 'sp-up' : priceData.change < 0 ? 'sp-down' : 'sp-flat';
-            const priceContent = buildPriceContent(symbol, priceData);
-
-            for (const span of spans) {
-                span.innerHTML = priceContent;
-                span.classList.remove('sp-up', 'sp-down', 'sp-flat');
-                span.classList.add(changeClass);
-                if (!FIAT_CODES.has(symbol)) {
-                    span.classList.toggle('sp-closed', isClosed);
-                }
+        toRefresh.forEach(s => lastRefresh.set(s, Date.now()));
+        toRefresh.forEach(s => {
+            if (!deadSymbols.has(s) && recentlySeen.has(s)) {
+                enqueueSymbols([s], null, true);
             }
-            log('updated', spans.length, 'span(s) for', symbol);
-        }
-
-        // Fetch in batches of 20, update DOM after each batch
-        for (let i = 0; i < toRefresh.length; i += BATCH_SIZE) {
-            const batch = toRefresh.slice(i, i + BATCH_SIZE);
-            log('refresh batch:', batch.join(', '));
-            const results = await Promise.all(batch.map(s => fetchPrice(s)));
-            for (let j = 0; j < batch.length; j++) {
-                const symbol = batch[j];
-                const result = results[j];
-                lastRefresh.set(symbol, Date.now());
-                if (result) {
-                    pagePriceMap.set(symbol, result);
-                    priceCache.set(symbol, { data: result, timestamp: Date.now() });
-                    updateSymbolSpans(symbol, result);
-                } else {
-                    log('fetch failed, marking dead:', symbol);
-                    deadSymbols.add(symbol);
-                    pagePriceMap.delete(symbol);
-                }
-            }
-            if (i + BATCH_SIZE < toRefresh.length) {
-                await new Promise(r => setTimeout(r, BATCH_INTERVAL));
-            }
-        }
+        });
+        if (!queueDraining) drainFetchQueue();
 
         log('refresh complete');
     }
@@ -997,6 +1306,16 @@
             return { pagePriceMap: [...pagePriceMap.keys()], deadSymbols: [...deadSymbols], pending: [...pendingFetches] };
         }
     };
+    // Allow clearing cache from page console (DOM events cross the TM sandbox):
+    //   document.dispatchEvent(new Event('sp-clear-cache'))
+    // then reload to trigger a fresh auto-fetch.
+    document.addEventListener('sp-clear-cache', function () {
+        GM_setValue(GMK_CACHE, null);
+        GM_setValue(GMK_VER, '');
+        console.log('[stock-price] cache cleared (sp_blacklist_cache + sp_last_script_ver). Reload to refetch.');
+        alert('黑名单缓存已清除，刷新页面后会重新拉取');
+    });
+
     console.log('[stock-price] Debug: use __stockPriceDebug.stats(), .recent(), .symbols(), .getLog()');
 
     initialized = true;
