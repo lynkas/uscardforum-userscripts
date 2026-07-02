@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USCardForum Length Helper
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.4
 // @description  Ensures post length is at least 4 chars (stickers count as 1) on USCardForum
 // @author       Antigravity
 // @match        https://www.uscardforum.com/*
@@ -13,7 +13,7 @@
     'use strict';
 
     const stickerRegex = /:[a-zA-Z0-9_\-+]+:/g;
-    const quoteRegex = /\[quote(?:=[^\]]+)?\][\s\S]*?\[\/quote\]/gi;
+    const quoteRegex = /\[quote(?:=[^\]]+)?\](?:(?!\[quote(?:=[^\]]+)?\])[\s\S])*?\[\/quote\]/gi;
 
     // Injected only when the post is completely empty. The raw "<a></a>" carries
     // an alphanumeric char ("a"), so it passes TextSentinel's seems_pronounceable?
