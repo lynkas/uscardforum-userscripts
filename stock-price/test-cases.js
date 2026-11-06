@@ -34,9 +34,10 @@ extractionTests.push({
 // ── 英文句子处理 ──
 
 extractionTests.push({
+    // 0.5：英文句子里的热门代码也识别（旧规则整句跳过会漏）
     name: '英文句子含语法词',
     input: 'I bought NVDA and TSLA today',
-    expected: [],
+    expected: ['NVDA', 'TSLA'],
 });
 
 extractionTests.push({
@@ -46,15 +47,17 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    // 0.5：MSFT 是热门代码直接识别；小写 uso 不是英文词，按 USO 识别；BUY 在排除表
     name: '$EXACT混合英文 — USO/BUY/MSFT不匹配',
     input: 'we uso buy $NvDa with $nq=f but not with $000001.SS in MSFT',
-    expected: ['NVDA', 'NQ=F', '000001.SS'],
+    expected: ['000001.SS', 'MSFT', 'NQ=F', 'NVDA', 'USO'],
 });
 
 extractionTests.push({
+    // 0.5：撇号后的 s 仍不匹配；英文句子里的 NVDA 识别
     name: '撇号阻止s匹配',
     input: "Trump's plan for NVDA",
-    expected: [],
+    expected: ['NVDA'],
 });
 
 // ── 排除规则 ──
@@ -108,9 +111,10 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    // 0.5：ADDED / INFO 不在代码清单里
     name: 'edit: 冒号后缀不提取（其余独立词照常）',
     input: 'edit: added more info',
-    expected: ['ADDED', 'INFO'],
+    expected: [],
 });
 
 extractionTests.push({
@@ -127,9 +131,10 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    // 0.5：NOTE 是英文常用词，单独一行且本楼没有其他代码 → 不识别
     name: 'note: 冒号后缀不提取但独立NOTE提取',
     input: 'note: something\nNOTE',
-    expected: ['NOTE'],
+    expected: [],
 });
 
 // ── 白名单和特殊代码 ──
@@ -215,9 +220,10 @@ extractionTests.push({
 // ── 多段落边界 ──
 
 extractionTests.push({
+    // 0.5：MSFT 识别；小写 cny 不当货币（货币代码要大写）
     name: '完整帖子多段落',
     input: '测试用\n\nNvda\nwe uso buy $NvDa with $nq=f but not with $000001.SS in MSFT\nAMD\nBRK.B brkb\nBTC cny\nuso',
-    expected: ['000001.SS', 'AMD', 'BRK.B', 'BRKB', 'BTC', 'CNY', 'NQ=F', 'NVDA', 'USO'],
+    expected: ['000001.SS', 'AMD', 'BRK.B', 'BRKB', 'BTC', 'MSFT', 'NQ=F', 'NVDA', 'USO'],
 });
 
 // ── 边界情况 ──
@@ -289,9 +295,10 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    // 0.5：英文句子里的热门代码也识别
     name: '中文段语法词短语不触发排除',
     input: 'this is a test NVDA TSLA',
-    expected: [], // English paragraph with grammar words → prose, no standalone
+    expected: ['NVDA', 'TSLA'], // English paragraph with grammar words → prose, no standalone
 });
 
 extractionTests.push({
@@ -551,9 +558,10 @@ extractionTests.push({
 // ── 英文散文 — 仅$EXACT提取 ──
 
 extractionTests.push({
+    // 0.5：英文句子里的热门代码也识别
     name: '英文散文 — 独立代码不提取',
     input: 'I bought some NVDA and TSLA today',
-    expected: [],
+    expected: ['NVDA', 'TSLA'],
 });
 
 extractionTests.push({
@@ -563,9 +571,10 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    // 0.5：英文句子里的热门代码也识别
     name: '英文散文 — 混合仅$EXACT提取独立不提取',
     input: 'My portfolio has NVDA TSLA and I added $AAPL',
-    expected: ['AAPL'],
+    expected: ['AAPL', 'NVDA', 'TSLA'],
 });
 
 // ── 边界情况 ──
@@ -577,9 +586,10 @@ extractionTests.push({
 });
 
 extractionTests.push({
+    // 0.5：BASIS 不在代码清单里
     name: '中文段 — 含数字和excludePhrases短语（basis孤立不触发cost basis排除）',
     input: '价格$100以上，买了NVDA和TSLA，成本basis',
-    expected: ['BASIS', 'NVDA', 'TSLA'],
+    expected: ['NVDA', 'TSLA'],
 });
 
 // ============================================================================
@@ -1169,261 +1179,85 @@ changeClassTests.push({
     expected: 'sp-down',
 });
 
-// ============================================================================
-// classifyParagraph 测试用例
-// 格式: { name, input, expected } — expected: 'chinese' | 'prose' | 'codelist'
-// ============================================================================
-
-const classifyParagraphTests = [];
-
-classifyParagraphTests.push({
-    name: '中文字符 → chinese',
-    input: '今天NVDA涨了',
-    expected: 'chinese',
-});
-
-classifyParagraphTests.push({
-    name: '英文句子含语法词 → prose',
-    input: 'I bought NVDA and TSLA today',
-    expected: 'prose',
-});
-
-classifyParagraphTests.push({
-    name: '英文代码列表 → codelist',
-    input: 'NVDA TSLA AAPL',
-    expected: 'codelist',
-});
-
-classifyParagraphTests.push({
-    name: '空行 → codelist',
-    input: '',
-    expected: 'codelist',
-});
-
-classifyParagraphTests.push({
-    name: '纯空格 → codelist',
-    input: '   ',
-    expected: 'codelist',
-});
-
-classifyParagraphTests.push({
-    name: '含撇号语法词 → prose',
-    input: "Trump's plan for NVDA",
-    expected: 'prose',
-});
-
-classifyParagraphTests.push({
-    name: '全大写无语法词 → codelist',
-    input: 'IPO PUT CALL',
-    expected: 'codelist',
-});
-
-classifyParagraphTests.push({
-    name: '含THE → prose',
-    input: 'THE stock is up',
-    expected: 'prose',
-});
 
 // ============================================================================
-// isTickerLike 测试用例
-// 格式: { name, input, expected } — input: word string
+// 0.5 识别规则：代码清单 + 上下文证据（来自论坛真实帖子的评测，见 tools/README.md）
+// 可选 ctx: { dollar: [本帖写过 $X 的代码], title: '帖子标题' }
 // ============================================================================
 
-const isTickerLikeTests = [];
+extractionTests.push({ name: '$ 后面是金额不是代码', input: '目标价 $250K，市值 $1.5T，$NVDA 冲', expected: ['NVDA'] });
+extractionTests.push({ name: '图片说明里的尺寸单位不是代码', input: 'IMG_3936 1077×569 93.8 KB', expected: [] });
+extractionTests.push({ name: '数字后的单位不是代码', input: '内存 16 GB，硬盘 2 TB', expected: [] });
+extractionTests.push({ name: '代码后跟价格照常识别', input: 'NVDA 135.20 TSLA 200.50', expected: ['NVDA', 'TSLA'] });
+extractionTests.push({ name: '小写热门代码', input: '最近买了点nvda和pltr', expected: ['NVDA', 'PLTR'] });
+extractionTests.push({ name: '小写但像英文词的代码不认', input: '打个uber去机场', expected: [] });
+extractionTests.push({ name: '不在代码清单里的大写词不认', input: 'CASH BONUS OFFER LAPTOP', expected: [] });
+extractionTests.push({ name: '撞车词无证据不认', input: 'COST 太高了不值', expected: [] });
+extractionTests.push({ name: '撞车词旁边有交易词', input: 'COST 财报不错', expected: ['COST'] });
+extractionTests.push({ name: '撞车词同一行有确定代码', input: '持仓：NVDA COST AAPL', expected: ['NVDA', 'COST', 'AAPL'] });
+extractionTests.push({ name: '小写撞车词不认', input: '这个 cost 太高 买不起', expected: [] });
+extractionTests.push({ name: '标题里出现过的撞车词', input: 'COST 今天怎么样', ctx: { title: 'COST 财报讨论' }, expected: ['COST'] });
+extractionTests.push({ name: '本帖写过 $X 的排除词也认', input: 'NOW 不错', ctx: { dollar: ['NOW'] }, expected: ['NOW'] });
+extractionTests.push({ name: '两字母代码要证据', input: 'MU 财报后涨了，AB 方案', expected: ['MU'] });
+extractionTests.push({ name: '冷门代码要证据', input: 'AENT 是什么\n买了点 AENT', expected: ['AENT'] });
+extractionTests.push({ name: '网址片段不算', input: '看这个 https://www.example.com/AAPL/news 和 www.cnbc.com', expected: [] });
+extractionTests.push({ name: '论坛常用缩写不认', input: 'LZ 的 PS: 用 IBKR 开户要 KYC', expected: [] });
+extractionTests.push({ name: '法币：说汇率时认', input: '日元又贬了 JPY 150', expected: ['JPY'] });
+extractionTests.push({ name: '法币：当金额单位不认', input: '账户里有 100 USD', expected: [] });
+extractionTests.push({ name: '代码列表行：只有货币也认', input: 'USD CNY', expected: ['USD', 'CNY'] });
+extractionTests.push({ name: '单字母只认 $ 写法', input: 'A股 和 F 都不算，$F 算', expected: ['F'] });
 
-isTickerLikeTests.push({
-    name: '全大写2字母 → true',
-    input: 'NV',
-    expected: true,
-});
+// ── 其他市场 ──
 
-isTickerLikeTests.push({
-    name: '全大写4字母 → true',
-    input: 'NVDA',
-    expected: true,
-});
+extractionTests.push({ name: '交易所后缀：日/港/伦敦', input: '古河电工 5801.T、VOD.L 以及 0700.HK', expected: ['5801.T', 'VOD.L', '0700.HK'] });
+extractionTests.push({ name: '交易所后缀：加拿大/澳洲/韩国', input: 'SHOP.TO BHP.AX 005930.KS', expected: ['SHOP.TO', 'BHP.AX', '005930.KS'] });
+extractionTests.push({ name: '缩写里的点不是后缀', input: 'e.g. U.S. a.m. i.e.', expected: [] });
+extractionTests.push({ name: '交易所前缀', input: 'Hisense (SHA: 600060)，另外 SZ300750', expected: ['600060', '300750'] });
+extractionTests.push({ name: 'A 股：沪市 + 6 位代码', input: '宁沪高速 今日沪市600377 12.21 CNY 股息年化4%', expected: ['600377'] });
+extractionTests.push({ name: '港股：市场词 + 4 位代码', input: '而港股0177 9.76 HKD 股息年化5.5%', expected: ['0177'] });
+extractionTests.push({ name: '韩股：6 位代码 + 交易词', input: '但我000660當初也只敢買倉位不到5%而已', expected: ['000660'] });
+extractionTests.push({ name: '日股：市场词 + 4 位代码（同句有"股"，丰田也算）', input: '日股 7203 丰田最近不错', expected: ['7203', '丰田'] });
+extractionTests.push({ name: '6 位数字是金额时不认', input: '买房花了600000，工资 300000 刀', expected: [] });
+extractionTests.push({ name: '4 位数字没有市场词不认（年份等）', input: '2025 买了 1234 份', expected: [] });
+extractionTests.push({ name: '港股后面的年份不认', input: '港股 2025年表现', expected: [] });
 
-isTickerLikeTests.push({
-    name: '混合大小写3字母以上 → true',
-    input: 'Nvda',
-    expected: true,
-});
+// ── 公司名（要有证据） ──
 
-isTickerLikeTests.push({
-    name: '含点号 → true',
-    input: 'BRK.B',
-    expected: true,
-});
-
-isTickerLikeTests.push({
-    name: '单字母小写 → false',
-    input: 'a',
-    expected: false,
-});
-
-isTickerLikeTests.push({
-    name: '白名单代码 → true',
-    input: 'GE',
-    expected: true,
-});
-
-isTickerLikeTests.push({
-    name: '单字母不在白名单 → false',
-    input: 'C',
-    expected: false,
-});
-
-isTickerLikeTests.push({
-    name: '别名代码 → true',
-    input: 'BRKB',
-    expected: true,
-});
-
-isTickerLikeTests.push({
-    name: '期货代码 → true',
-    input: 'ES',
-    expected: true,
-});
-
-isTickerLikeTests.push({
-    name: '普通小写单词 → false',
-    input: 'the',
-    expected: false,
-});
+extractionTests.push({ name: '中文公司名 + 交易词', input: '英伟达财报超预期，台积电也涨了', expected: ['英伟达', '台积电'] });
+extractionTests.push({ name: '中文公司名无证据不认', input: '苹果手机真好用', expected: [] });
+extractionTests.push({ name: '长名优先：阿里巴巴不重复算阿里', input: '阿里巴巴股价', expected: ['阿里巴巴'] });
+extractionTests.push({ name: '英文公司名 + 交易词', input: '对 Nike 股票实在没兴趣', expected: ['NIKE'] });
+extractionTests.push({ name: '港股公司名', input: '腾讯又跌了', expected: ['腾讯'] });
 
 // ============================================================================
-// isAcceptedCode 测试用例
-// 格式: { name, input, expected }
+// yahooCandidates：论坛写法 → 依次尝试的 Yahoo 代码
+// setup：先识别这段文本（纯数字代码的市场在识别时推断）
 // ============================================================================
 
-const isAcceptedCodeTests = [];
+const candidateTests = [];
 
-isAcceptedCodeTests.push({
-    name: '3字母代码 → true',
-    input: 'AAP',
-    expected: true,
-});
-
-isAcceptedCodeTests.push({
-    name: '4字母代码 → true',
-    input: 'NVDA',
-    expected: true,
-});
-
-isAcceptedCodeTests.push({
-    name: '白名单2字母 → true',
-    input: 'GE',
-    expected: true,
-});
-
-isAcceptedCodeTests.push({
-    name: '单字母不在白名单 → false',
-    input: 'C',
-    expected: false,
-});
-
-isAcceptedCodeTests.push({
-    name: '期货代码 → true',
-    input: 'ES',
-    expected: true,
-});
-
-isAcceptedCodeTests.push({
-    name: '别名代码 → true',
-    input: 'BRKB',
-    expected: true,
-});
-
-isAcceptedCodeTests.push({
-    name: '非白名单2字母 → false',
-    input: 'AB',
-    expected: false,
-});
-
-isAcceptedCodeTests.push({
-    name: '非白名单单字母 → false',
-    input: 'D',
-    expected: false,
-});
+candidateTests.push({ name: '港股补足 4 位', input: '700.HK', expected: ['0700.HK'] });
+candidateTests.push({ name: '港股 5 位去掉前导 0', input: '09988.HK', expected: ['9988.HK'] });
+candidateTests.push({ name: '.SH 写法 → Yahoo 的 .SS', input: '600519.SH', expected: ['600519.SS'] });
+candidateTests.push({ name: '伦敦', input: 'VOD.L', expected: ['VOD.L'] });
+candidateTests.push({ name: '美股类别股 BF.B → BF-B', input: 'BF.B', expected: ['BF-B'] });
+candidateTests.push({ name: '中文公司名 → 美股', input: '英伟达', expected: ['NVDA'] });
+candidateTests.push({ name: '中文公司名 → 港股', input: '腾讯', expected: ['0700.HK'] });
+candidateTests.push({ name: '沪市 6 位：.SS 优先', setup: '沪市600377', input: '600377', expected: ['600377.SS', '600377.SZ', '600377.KS', '600377.KQ'] });
+candidateTests.push({ name: '0 开头 6 位：.SZ 优先，再试韩股', setup: '买了000660', input: '000660', expected: ['000660.SZ', '000660.SS', '000660.KS', '000660.KQ'] });
+candidateTests.push({ name: '韩股语境：.KS 优先', setup: '韩股 005930 买', input: '005930', expected: ['005930.KS', '005930.KQ', '005930.SZ', '005930.SS'] });
+candidateTests.push({ name: '港股 4 位', setup: '港股0177 买', input: '0177', expected: ['0177.HK'] });
+candidateTests.push({ name: '前缀 SHA', setup: 'SHA: 600060', input: '600060', expected: ['600060.SS', '600060.SZ', '600060.KS', '600060.KQ'] });
 
 // ============================================================================
-// groupParagraphs 测试用例
-// 格式: { name, input, expected }
-// expected: [{ type, text }] (offset omitted for readability)
+// acceptsForm：这种写法能不能当代码
 // ============================================================================
 
-const groupParagraphsTests = [];
+const acceptsFormTests = [];
 
-groupParagraphsTests.push({
-    name: '单个中文段',
-    input: '今天NVDA涨了',
-    expected: [{ type: 'chinese', text: '今天NVDA涨了' }],
-});
-
-groupParagraphsTests.push({
-    name: '单个代码列表',
-    input: 'NVDA TSLA AAPL',
-    expected: [{ type: 'codelist', text: 'NVDA TSLA AAPL' }],
-});
-
-groupParagraphsTests.push({
-    name: '单个英文散文',
-    input: 'I bought NVDA today',
-    expected: [{ type: 'prose', text: 'I bought NVDA today' }],
-});
-
-groupParagraphsTests.push({
-    name: '连续代码列表合并',
-    input: 'NVDA\nTSLA\nAAPL',
-    expected: [{ type: 'codelist', text: 'NVDA\nTSLA\nAAPL' }],
-});
-
-groupParagraphsTests.push({
-    name: '连续散文合并',
-    input: 'I bought NVDA\nand sold TSLA',
-    expected: [{ type: 'prose', text: 'I bought NVDA\nand sold TSLA' }],
-});
-
-groupParagraphsTests.push({
-    name: '中文段不与英文合并',
-    input: '今天涨了\nNVDA TSLA',
-    expected: [
-        { type: 'chinese', text: '今天涨了' },
-        { type: 'codelist', text: 'NVDA TSLA' },
-    ],
-});
-
-groupParagraphsTests.push({
-    name: '代码列表后散文不合并',
-    input: 'NVDA TSLA\nI bought NVDA today',
-    expected: [
-        { type: 'codelist', text: 'NVDA TSLA' },
-        { type: 'prose', text: 'I bought NVDA today' },
-    ],
-});
-
-groupParagraphsTests.push({
-    name: '三段不同类型',
-    input: '今天涨了\nNVDA TSLA\nI bought it',
-    expected: [
-        { type: 'chinese', text: '今天涨了' },
-        { type: 'codelist', text: 'NVDA TSLA' },
-        { type: 'prose', text: 'I bought it' },
-    ],
-});
-
-groupParagraphsTests.push({
-    name: '空输入',
-    input: '',
-    expected: [{ type: 'codelist', text: '' }],
-});
-
-groupParagraphsTests.push({
-    name: '多空行各自成组',
-    input: '\n\n',
-    expected: [
-        { type: 'codelist', text: '' },
-        { type: 'codelist', text: '' },
-        { type: 'codelist', text: '' },
-    ],
-});
+acceptsFormTests.push({ name: '大写', code: 'NVDA', raw: 'NVDA', expected: true });
+acceptsFormTests.push({ name: '小写热门代码', code: 'NVDA', raw: 'nvda', expected: true });
+acceptsFormTests.push({ name: '小写撞车词', code: 'COST', raw: 'cost', expected: false });
+acceptsFormTests.push({ name: '大写撞车词', code: 'COST', raw: 'COST', expected: true });
+acceptsFormTests.push({ name: '小写但像英文词', code: 'UBER', raw: 'uber', expected: false });
+acceptsFormTests.push({ name: '公司名不限大小写', code: 'NIKE', raw: 'nike', expected: true });
