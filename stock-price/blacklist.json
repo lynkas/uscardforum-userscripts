@@ -1,10 +1,11 @@
 {
-  "version": 6,
+  "version": 7,
 
-  // ── excludeCodes: 看起来像股票代码但不该匹配的词 ──
-  // 包含：交易术语(BUY/HOLD)、月份缩写(JAN-DEC)、财经缩写(YTD/IRS/ROTH)、
-  //       以及恰好是真实股票代码但作为常见英语词默认排除的(ALL/NOW/RUN/for等15个)。
-  // 想放行某个(如想看 AI 价格)就从这里删掉对应项。
+  // 代码清单（哪些词是真实代码、热门还是冷门、是否撞英文常用词）在 tickers.json，
+  // 由 tools/build-tickers.js 每周自动生成；这里只放需要人工判断的部分。
+
+  // ── excludeCodes: 是真实代码、但在论坛里几乎总是别的意思的词（写成 $X 时仍然识别）──
+  // 交易术语、月份、财经/科技缩写、券商银行名、常见英文词等。想放行某个就删掉。
   "excludeCodes": [
     "IPO", "PUT", "CALL", "G", "ZS", "B", "WTF", "CAPEX", "TLDR", "BUY",
     "ARROW", "YTD", "OIL", "YEAR", "BEAT", "HOLD", "TACO", "OPUS", "GPT", "PAY",
@@ -20,7 +21,16 @@
     "STOCK", "BLAH", "BRO", "NRA", "NASA", "HTTPS",
     "BUG",
     "ADR", "BETA", "MEME", "MOAT", "EASY", "ELON", "BILL",
-    "EXP"
+    "EXP",
+    // 2026-11 用论坛真实帖子评测后补充：财经缩写
+    "EPS", "PEG", "PE", "PB", "NAV", "ETF", "ACH", "KYC", "RSU", "ESPP", "IRA", "CEO", "CFO",
+    "DCA", "OTM", "ITM", "ATM", "IV", "DD", "YOY", "QOQ", "EOD", "LLC", "CPA", "SSN", "VC", "PR",
+    // 科技缩写
+    "LLM", "GPU", "CPU", "SSD", "HBM", "TV", "IP", "PPT", "ERC",
+    // 券商、银行、信用卡（多数时候指服务本身）
+    "IBKR", "RH", "SOFI", "HSBC", "WF", "CSR",
+    // 论坛用语
+    "OP", "PS", "LZ", "OK", "LOL", "FOMO", "YOLO", "HODL", "PRE", "TOS", "BBB", "CORP", "MAGA"
   ],
 
   // ── excludePhrases: 这些短语中的词不会被单独匹配为股票代码 ──
@@ -44,15 +54,39 @@
     "open weight"
   ],
 
-  // ── aliases: 论坛写法 → Yahoo Finance 实际代码 ──
-  // BRK 加点号无法直接查询，SPX/WTI 需要 Yahoo 专有后缀。
+  // ── aliases: 代码的其他写法 → Yahoo Finance 代码（等同代码本身，直接识别）──
   "aliases": {
     "BRKB": "BRK-B",
     "BRKA": "BRK-A",
     "BRK.B": "BRK-B",
     "BRK.A": "BRK-A",
     "SPX": "^GSPC",
+    "NDX": "^NDX",
     "WTI": "CL=F"
+  },
+
+  // ── nameAliases: 公司名 → Yahoo Finance 代码 ──
+  // 公司名常有别的意思（苹果、小米、Google 一下），所以要有上下文证据才识别：
+  // 旁边有 股/涨/跌/买/仓/财报 之类、标题里出现过、或本帖写过 $代码。
+  // 港股 0700.HK、A 股 600519.SS / 300750.SZ、日股 9984.T、韩股 005930.KS。
+  "nameAliases": {
+    "NVIDIA": "NVDA", "GOOGLE": "GOOGL", "APPLE": "AAPL", "TESLA": "TSLA", "AMAZON": "AMZN",
+    "MICROSOFT": "MSFT", "NETFLIX": "NFLX", "COSTCO": "COST", "INTEL": "INTC", "NIKE": "NKE",
+    "TSMC": "TSM", "CISCO": "CSCO", "NOKIA": "NOK", "BOEING": "BA", "DISNEY": "DIS",
+    "ORACLE": "ORCL", "BROADCOM": "AVGO", "PALANTIR": "PLTR", "MICRON": "MU", "UNITY": "U",
+    "SAMSUNG": "005930.KS", "TENCENT": "0700.HK", "ALIBABA": "BABA", "BERKSHIRE": "BRK-B",
+
+    "英伟达": "NVDA", "辉达": "NVDA", "輝達": "NVDA", "苹果": "AAPL", "蘋果": "AAPL",
+    "微软": "MSFT", "微軟": "MSFT", "谷歌": "GOOGL", "亚马逊": "AMZN", "亞馬遜": "AMZN",
+    "特斯拉": "TSLA", "台积电": "TSM", "台積電": "TSM", "美光": "MU", "博通": "AVGO",
+    "甲骨文": "ORCL", "奈飞": "NFLX", "网飞": "NFLX", "伯克希尔": "BRK-B",
+    "好市多": "COST", "开市客": "COST", "英特尔": "INTC", "高通": "QCOM", "阿斯麦": "ASML",
+    "腾讯": "0700.HK", "騰訊": "0700.HK", "阿里巴巴": "BABA", "阿里": "BABA", "京东": "JD",
+    "拼多多": "PDD", "美团": "3690.HK", "小米": "1810.HK", "比亚迪": "1211.HK", "网易": "NTES",
+    "百度": "BIDU", "贵州茅台": "600519.SS", "茅台": "600519.SS", "宁德时代": "300750.SZ",
+    "中际旭创": "300308.SZ", "旭创": "300308.SZ", "新易盛": "300502.SZ",
+    "三星": "005930.KS", "SK海力士": "000660.KS", "海力士": "000660.KS",
+    "丰田": "TM", "索尼": "SONY", "任天堂": "NTDOY", "软银": "9984.T", "軟銀": "9984.T"
   },
 
   // ── cryptoCodes: 加密货币，Yahoo 自动加 -USD 后缀查询 ──
@@ -60,7 +94,8 @@
     "BTC", "ETH", "USDT", "BNB", "SOL", "XRP", "USDC", "DOGE",
     "ADA", "TRX", "AVAX", "DOT", "LINK", "MATIC", "SHIB", "LTC",
     "UNI", "ATOM", "XLM", "ETC", "BCH", "FIL", "APT", "NEAR",
-    "AAVE", "ARB", "OP"
+    "AAVE", "ARB", "SUI", "TON", "PEPE", "HYPE",
+    "DAI", "PYUSD", "USDG", "FDUSD", "USDE"
   ],
 
   // ── fiatCodes: 法币，Yahoo 用 CURRENCY=X 格式，显示为 1 USD 兑换价 ──
@@ -80,36 +115,5 @@
     "ZB", "ZN", "ZF", "ZT",
     "ZW", "ZC", "ZS", "KC", "SB",
     "CT", "LBS"
-  ],
-
-  // ── shortCodeWhitelist: 允许匹配的单/双字母"真"股票代码 ──
-  // 默认排除规则会跳过 1-2 字母词，这里放行已确认是上市公司的。
-  // (AI 已移到 excludeCodes，故从白名单删除)
-  "shortCodeWhitelist": [
-    "AA", "AM", "BA", "BR", "CA", "CI", "CV", "CW", "DE", "DU",
-    "EM", "FC", "FL", "GE", "GM", "GS", "HP", "IQ",
-    "JO", "KC", "KO", "LI", "MA", "MC", "MR", "MU", "NU", "NV",
-    "PG", "PL", "QQ", "SQ", "ST", "TM", "UB", "UI",
-    "UM", "VM", "WU",
-    "ES", "NQ", "YM", "GC", "SI", "HG", "PA", "CL", "NG",
-    "RB", "HO", "BZ", "ZB", "ZN", "ZF", "ZT", "ZW", "ZC",
-    "SB", "CT"
-  ],
-
-  // ── commonWords: 常见英语词，确认不是股票代码，用于过滤误匹配 ──
-  // 已剔除 15 个恰好是真实股票代码的词(它们在 excludeCodes 里)。
-  // 这些是纯英语词汇，Yahoo 上查无对应 ticker。
-  "commonWords": [
-    "THE", "AND", "BUT", "NOT", "HER", "WAS", "ONE", "OUR", "HIS", "HOW",
-    "ITS", "MAY", "NEW", "OLD", "SEE", "WHO", "BOY", "DID", "GET", "HIM",
-    "LET", "SAY", "SHE", "TOO", "USE", "DAD", "MOM", "SET", "TRY", "ASK",
-    "MEN", "RAN", "OWN", "CAME", "COME", "EACH", "MAKE", "LIKE", "LONG", "LOOK",
-    "MANY", "SOME", "THEM", "THEN", "THAN", "THIS", "THAT", "WITH", "HAVE", "FROM",
-    "YOUR", "THEY", "BEEN", "CALL", "WILL", "JUST", "VERY", "TAKE", "ALSO", "INTO",
-    "MORE", "OVER", "SUCH", "AFTER", "BACK", "COULD", "ONLY", "MADE", "FIND", "KNOW",
-    "LAST", "DOWN", "SIDE", "STILL", "BEING", "FIRST", "ABOUT", "OTHER", "WHICH", "THEIR",
-    "THERE", "EVERY", "WOULD", "ABOVE", "UNDER", "THOSE", "THESE", "WHERE", "WHEN", "WHAT",
-    "HOURS", "DAYS", "WEEK", "BEST", "MOST", "GREAT", "NEED", "WANT", "THINK", "GOING",
-    "RIGHT", "THING", "REALLY", "ALREADY", "BEFORE"
   ]
 }
