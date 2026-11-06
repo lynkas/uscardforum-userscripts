@@ -4,309 +4,35 @@
 const fs = require('fs');
 const path = require('path');
 
-// ── Read main script source ────────────────────────────────────────────────
+// ── 加载脚本里的 core 段（#region core … #endregion core） ───────────────────
+// 测试跑的就是脚本里的原函数，不另抄一份。
 const scriptSrc = fs.readFileSync(
     path.join(__dirname, 'stock-price-tampermonkey.user.js'),
     'utf8'
 );
+const coreM = scriptSrc.match(/\/\/ #region core\n([\s\S]*?)\/\/ #endregion core/);
+if (!coreM) throw new Error('Cannot find "#region core" block in script');
 
-// ── Load config from blacklist.json (JSONC — strip comments) ──────────────
-function stripJsonc(text) {
-    return text
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/(^|[^:])\/\/.*$/gm, '$1')
-        .replace(/,\s*([}\]])/g, '$1');
-}
+const CORE_EXPORTS = [
+    'applyRemoteData', 'stripJsonc',
+    'classifyParagraph', 'isTickerLike', 'isAcceptedCode', 'groupParagraphs', 'extractStockCodes',
+    'resolveYahooSymbol', 'getMarketSession', 'isCacheExpired', 'sortByRecentlySeen',
+    'getChangeClass', 'buildPriceContent',
+];
+const core = new Function(`'use strict';\n${coreM[1]}\nreturn { ${CORE_EXPORTS.join(', ')} };`)();
+const {
+    classifyParagraph, isTickerLike, isAcceptedCode, groupParagraphs, extractStockCodes,
+    resolveYahooSymbol, getMarketSession, isCacheExpired, sortByRecentlySeen, getChangeClass,
+} = core;
+
+// ── 用仓库里的 blacklist.json 填充配置（与线上同一个加载函数） ───────────────
 const configRaw = fs.readFileSync(path.join(__dirname, 'blacklist.json'), 'utf8');
-const CONFIG = JSON.parse(stripJsonc(configRaw));
+core.applyRemoteData(JSON.parse(core.stripJsonc(configRaw)));
 
-const EXCLUDE_CODES = new Set(CONFIG.excludeCodes);
-const EXCLUDE_PHRASES = CONFIG.excludePhrases;
-const SYMBOL_ALIASES = CONFIG.aliases;
-const CRYPTO_CODES = new Set(CONFIG.cryptoCodes);
-const FIAT_CODES = new Set(CONFIG.fiatCodes);
-const FUTURES_CODES = new Set(CONFIG.futuresCodes);
-const SHORT_CODE_WHITELIST = new Set(CONFIG.shortCodeWhitelist);
-const COMMON_WORDS = new Set(CONFIG.commonWords);
-
-// GRAMMAR_WORDS stays hardcoded in .user.js — extract via regex
-const grammarRe = /GRAMMAR_WORDS\s*=\s*new Set\(([\s\S]*?)\);/;
-const grammarM = scriptSrc.match(grammarRe);
-if (!grammarM) throw new Error('Cannot find GRAMMAR_WORDS in script');
-const GRAMMAR_WORDS = new Set(
-    grammarM[1]
-        .split(',')
-        .map(s => s.trim().replace(/^['"]|['"]$/g, ''))
-        .filter(Boolean)
-        .filter(s => !s.startsWith('//'))
-);
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-function classifyParagraph(para) {
-    if (/[^\x00-\x7F]/.test(para)) return 'chinese';
-    const words = [...para.matchAll(/[A-Za-z.']+/g)].map(m => m[0].toUpperCase());
-    if (words.some(w => GRAMMAR_WORDS.has(w))) return 'prose';
-    if (words.length > 10) return 'prose';
-    return 'codelist';
-}
-
-function isTickerLike(word) {
-    if (word.length >= 3 && !COMMON_WORDS.has(word.toUpperCase())) return true;
-    if (word.length >= 2 && word === word.toUpperCase()) return true;
-    if (word.includes('.')) return true;
-    const upper = word.toUpperCase();
-    if (SHORT_CODE_WHITELIST.has(upper)) return true;
-    if (SYMBOL_ALIASES[upper]) return true;
-    if (FUTURES_CODES.has(upper)) return true;
-    return false;
-}
-
-function isAcceptedCode(code) {
-    if (SHORT_CODE_WHITELIST.has(code) || SYMBOL_ALIASES[code] || FUTURES_CODES.has(code)) return true;
-    const dotIdx = code.indexOf('.');
-    if (dotIdx >= 0 && code.length - dotIdx - 1 < 2) return false;
-    if (code.length < 2) return false;
-    return code.length >= 3;
-}
-
-function groupParagraphs(text) {
-    const paragraphs = text.split(/\n/);
-    const groups = [];
-    let offset = 0;
-
-    for (let i = 0; i < paragraphs.length;) {
-        const para = paragraphs[i];
-        const type = classifyParagraph(para);
-
-        if (type === 'chinese' || para === '') {
-            groups.push({ type, text: para, offset });
-            offset += para.length + 1;
-            i++;
-        } else {
-            let segText = para;
-            let j = i + 1;
-            while (j < paragraphs.length) {
-                const nextPara = paragraphs[j];
-                if (classifyParagraph(nextPara) !== type) break;
-                segText += '\n' + paragraphs[j];
-                j++;
-            }
-            groups.push({ type, text: segText, offset });
-            offset += segText.length + 1;
-            i = j;
-        }
-    }
-    return groups;
-}
-
-// ── Stage 1: $EXACT ─────────────────────────────────────────────────────────
-
-const RE_EXACT = /\$([A-Za-z0-9.\-=^]*[A-Za-z0-9])/g;
-
-function collectExactCodes(text) {
-    const codes = new Set();
-    for (const m of text.matchAll(RE_EXACT)) {
-        const code = m[1].toUpperCase();
-        if (/[A-Z]/.test(code)) codes.add(code);
-    }
-    return codes;
-}
-
-// ── Stage 2: Skip zones & special extractors ────────────────────────────────
-
-function buildExactZones(text, offset) {
-    const zones = [];
-    for (const m of text.matchAll(RE_EXACT)) {
-        zones.push([offset + m.index, offset + m.index + m[0].length]);
-    }
-    return zones;
-}
-
-const RE_DOT_CODE = /(?<![A-Za-z\d])([A-Za-z0-9]+\.([A-Za-z]{1,2}))(?![A-Za-z\d])/gi;
-
-function collectDotCodes(text, offset) {
-    const codes = new Set();
-    const zones = [];
-    for (const m of text.matchAll(RE_DOT_CODE)) {
-        if (/^\d/.test(m[1]) || m[2].length === 2) {
-            codes.add(m[1].toUpperCase());
-            zones.push([offset + m.index, offset + m.index + m[0].length]);
-        }
-    }
-    return { codes, zones };
-}
-
-const RE_FOREX = /(?<![A-Za-z\d])([A-Za-z]{6})(?![A-Za-z])(=?([A-Za-z]))?(?![A-Za-z\d])/g;
-
-function collectForexPairs(text, offset) {
-    const codes = new Set();
-    const zones = [];
-    for (const m of text.matchAll(RE_FOREX)) {
-        const pair = m[1].toUpperCase();
-        if (!FIAT_CODES.has(pair.slice(0, 3)) || !FIAT_CODES.has(pair.slice(3))) continue;
-        const code = m[2] ? (pair + '=' + m[3].toUpperCase()) : pair;
-        codes.add(code);
-        zones.push([offset + m.index, offset + m.index + m[0].length]);
-    }
-    return { codes, zones };
-}
-
-function buildGrammarZones(text, offset) {
-    const zones = [];
-    for (const m of text.matchAll(/[A-Za-z']+(?:[^A-Za-z'\n\u4e00-\u9fff\u3040-\u309f\uac00-\ud7af]+[A-Za-z']+)+/g)) {
-        const words = m[0].split(/[^A-Za-z']+/).filter(Boolean).map(w => w.toUpperCase());
-        if (words.length >= 3 && words.some(w => GRAMMAR_WORDS.has(w))) {
-            zones.push([offset + m.index, offset + m.index + m[0].length]);
-        }
-    }
-    return zones;
-}
-
-function buildPhraseZones(text, offset) {
-    const zones = [];
-    const upper = text.toUpperCase();
-    for (const phrase of EXCLUDE_PHRASES) {
-        const pUpper = phrase.toUpperCase();
-        let p = 0;
-        while ((p = upper.indexOf(pUpper, p)) !== -1) {
-            const before = p > 0 ? upper[p - 1] : ' ';
-            const after = upper[p + pUpper.length] || ' ';
-            if (!/[A-Z]/.test(before) && !/[A-Z]/.test(after)) {
-                zones.push([offset + p, offset + p + pUpper.length]);
-            }
-            p++;
-        }
-    }
-    return zones;
-}
-
-const RE_STANDALONE = /(?<![A-Za-z\d'])([A-Za-z]{1,5}(?:\.[A-Za-z])?)(?![A-Za-z\d:])/g;
-
-function collectStandalone(text, offset, zones) {
-    const codes = new Set();
-    for (const m of text.matchAll(RE_STANDALONE)) {
-        const pos = offset + m.index;
-        if (zones.some(([s, e]) => pos >= s && pos < e)) continue;
-        const code = m[1].toUpperCase();
-        if (isAcceptedCode(code)) codes.add(code);
-    }
-    return codes;
-}
-
-// ── Pipeline ────────────────────────────────────────────────────────────────
-
-function extractStockCodes(container) {
-    const text = container.textContent || '';
-
-    // Stage 1: $EXACT (always global)
-    const exactCodes = collectExactCodes(text);
-
-    // Stage 2: per-group extraction
-    const standaloneCodes = new Set();
-    for (const group of groupParagraphs(text)) {
-        if (group.type === 'prose') continue;
-
-        if (group.type === 'codelist') {
-            const words = [...group.text.matchAll(/[A-Za-z0-9.]+/g)].map(m => m[0]);
-            if (!words.some(isTickerLike)) continue;
-        }
-
-        let zones = buildExactZones(group.text, group.offset);
-
-        const dot = collectDotCodes(group.text, group.offset);
-        const forex = collectForexPairs(group.text, group.offset);
-        zones = zones.concat(dot.zones, forex.zones);
-
-        if (group.type === 'chinese') {
-            zones = zones.concat(
-                buildGrammarZones(group.text, group.offset),
-                buildPhraseZones(group.text, group.offset)
-            );
-        } else {
-            zones = zones.concat(buildPhraseZones(group.text, group.offset));
-        }
-
-        for (const c of dot.codes) standaloneCodes.add(c);
-        for (const c of forex.codes) standaloneCodes.add(c);
-        for (const c of collectStandalone(group.text, group.offset, zones)) standaloneCodes.add(c);
-    }
-
-    // Stage 3: filter & merge
-    const filtered = [...standaloneCodes]
-        .filter(code => !COMMON_WORDS.has(code) && !EXCLUDE_CODES.has(code));
-    return [...new Set([...exactCodes, ...filtered])];
-}
-
-// ── resolveYahooSymbol ─────────────────────────────────────────────────────
-
-function resolveYahooSymbol(symbol) {
-    const resolved = SYMBOL_ALIASES[symbol] || symbol;
-    if (CRYPTO_CODES.has(resolved)) return `${resolved}-USD`;
-    if (FIAT_CODES.has(resolved)) return `${resolved}=X`;
-    if (/^[A-Z]{6}$/.test(resolved) && FIAT_CODES.has(resolved.slice(0,3)) && FIAT_CODES.has(resolved.slice(3))) return `${resolved}=X`;
-    if (FUTURES_CODES.has(resolved)) return `${resolved}=F`;
-    return resolved;
-}
-
-// ── getMarketSession ─────────────────────────────────────────────────────────
-
-function getMarketSession(tp, nowS) {
-    if (!tp?.regular) return 'unknown';
-    if (nowS < tp.regular.start) {
-        return tp.pre && nowS >= tp.pre.start ? 'pre' : 'closed';
-    }
-    if (nowS >= tp.regular.start && nowS < tp.regular.end) return 'regular';
-    if (tp.post && nowS >= tp.post.start && nowS < tp.post.end) return 'post';
-    return 'closed';
-}
-
-function isMarketClosed(tradingPeriod, nowS) {
-    return getMarketSession(tradingPeriod, nowS) === 'closed';
-}
-
-// ── isCacheExpired ─────────────────────────────────────────────────────────
-
-function isCacheExpired(timestamp, now, ttl) {
-    return (now - timestamp) >= ttl;
-}
-
-// ── sortByRecentlySeen ─────────────────────────────────────────────────────
-
-function sortByRecentlySeen(symbols, recentlySeen) {
-    return [...symbols].sort((a, b) => (recentlySeen.get(b) || 0) - (recentlySeen.get(a) || 0));
-}
-
-// ── formatPriceText ────────────────────────────────────────────────────────
-
-function formatChange(val) {
-    return val >= 0 ? `+${val.toFixed(2)}` : val.toFixed(2);
-}
-
-function formatPriceText(symbol, priceData) {
-    const isFiat = FIAT_CODES.has(symbol);
-    if (isFiat) {
-        return `(1=${symbol}${priceData.price.toFixed(2)} ${formatChange(priceData.change)}%)`;
-    }
-    const tp = priceData.tradingPeriod;
-    const session = getMarketSession(tp, priceData._nowS ?? Date.now() / 1000);
-    const prefix = session === 'closed' ? 'C' : '';
-    let text = `(${prefix}${priceData.price.toFixed(2)} ${formatChange(priceData.change)}%)`;
-    const afterPrice = session === 'post' ? priceData.postPrice : session === 'pre' ? priceData.prePrice : null;
-    const afterChange = session === 'post' ? priceData.postChange : session === 'pre' ? priceData.preChange : null;
-    if (afterPrice != null) {
-        text += ` · P${afterPrice.toFixed(2)} ${formatChange(afterChange)}%`;
-    }
-    return text;
-}
-
-// ── getChangeClass ─────────────────────────────────────────────────────────
-
-function getChangeClass(change) {
-    if (change > 0) return 'sp-up';
-    if (change < 0) return 'sp-down';
-    return 'sp-flat';
-}
+const isMarketClosed = (tp, nowS) => getMarketSession(tp, nowS) === 'closed';
+// 价格文本：去掉盘前盘后那段的 <span> 标签，只比较文字
+const formatPriceText = (symbol, priceData) =>
+    core.buildPriceContent(symbol, priceData, priceData._nowS).replace(/<[^>]+>/g, '');
 
 // ── Load test arrays from test-cases.js ────────────────────────────────────
 
