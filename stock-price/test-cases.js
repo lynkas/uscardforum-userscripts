@@ -904,14 +904,14 @@ const postTp = { pre: { start: 32400, end: 36000 }, regular: { start: 36000, end
 priceFormatTests.push({
     name: '盘后上涨 — 显示P价格',
     symbol: 'AAPL',
-    priceData: { price: 150.25, change: 2.35, postPrice: 152.00, postChange: 1.16, tradingPeriod: postTp, _nowS: 60000 },
+    priceData: { price: 150.25, change: 2.35, extPrice: 152.00, extChange: 1.16, tradingPeriod: postTp, _nowS: 60000 },
     expected: '(150.25 +2.35%) · P152.00 +1.16%',
 });
 
 priceFormatTests.push({
     name: '盘后下跌 — 显示P价格',
     symbol: 'TSLA',
-    priceData: { price: 200.50, change: -3.10, postPrice: 198.00, postChange: -1.25, tradingPeriod: postTp, _nowS: 60000 },
+    priceData: { price: 200.50, change: -3.10, extPrice: 198.00, extChange: -1.25, tradingPeriod: postTp, _nowS: 60000 },
     expected: '(200.50 -3.10%) · P198.00 -1.25%',
 });
 
@@ -919,7 +919,7 @@ priceFormatTests.push({
 priceFormatTests.push({
     name: '盘前价格 — 显示P价格',
     symbol: 'NVDA',
-    priceData: { price: 800.00, change: 5.00, prePrice: 805.00, preChange: 0.63, tradingPeriod: postTp, _nowS: 33000 },
+    priceData: { price: 800.00, change: 5.00, extPrice: 805.00, extChange: 0.63, tradingPeriod: postTp, _nowS: 33000 },
     expected: '(800.00 +5.00%) · P805.00 +0.63%',
 });
 
@@ -927,7 +927,7 @@ priceFormatTests.push({
 priceFormatTests.push({
     name: '盘中 — 不显示盘后',
     symbol: 'AAPL',
-    priceData: { price: 150.25, change: 2.35, postPrice: 152.00, postChange: 1.16, tradingPeriod: postTp, _nowS: 45000 },
+    priceData: { price: 150.25, change: 2.35, extPrice: 152.00, extChange: 1.16, tradingPeriod: postTp, _nowS: 45000 },
     expected: '(150.25 +2.35%)',
 });
 
@@ -1086,63 +1086,6 @@ cacheExpiryTests.push({
 });
 
 // ============================================================================
-// sortByRecentlySeen 测试用例
-// 格式: { name, symbols, recentlySeen, expected }
-// recentlySeen 是 [symbol, timestamp] 元组数组
-// ============================================================================
-
-const recentlySeenSortTests = [];
-
-recentlySeenSortTests.push({
-    name: '基本排序 — 最近看到的在前',
-    symbols: ['AAPL', 'TSLA', 'NVDA'],
-    recentlySeen: [['AAPL', 1000], ['TSLA', 3000], ['NVDA', 2000]],
-    expected: ['TSLA', 'NVDA', 'AAPL'],
-});
-
-recentlySeenSortTests.push({
-    name: '部分有记录部分无 — 空记录排在最后',
-    symbols: ['AAPL', 'TSLA', 'NVDA'],
-    recentlySeen: [['AAPL', 1000], ['TSLA', 3000]],
-    expected: ['TSLA', 'AAPL', 'NVDA'],
-});
-
-recentlySeenSortTests.push({
-    name: '单元素',
-    symbols: ['AAPL'],
-    recentlySeen: [['AAPL', 1000]],
-    expected: ['AAPL'],
-});
-
-recentlySeenSortTests.push({
-    name: '相同时间戳保持有序',
-    symbols: ['NVDA', 'AAPL', 'TSLA'],
-    recentlySeen: [['NVDA', 2000], ['AAPL', 2000], ['TSLA', 2000]],
-    expected: ['NVDA', 'AAPL', 'TSLA'], // stable sort preserves insertion order
-});
-
-recentlySeenSortTests.push({
-    name: '空列表',
-    symbols: [],
-    recentlySeen: [],
-    expected: [],
-});
-
-recentlySeenSortTests.push({
-    name: '全部无时间戳',
-    symbols: ['AAPL', 'TSLA', 'NVDA'],
-    recentlySeen: [],
-    expected: ['AAPL', 'TSLA', 'NVDA'],
-});
-
-recentlySeenSortTests.push({
-    name: '混合 — 部分有部分无',
-    symbols: ['OLD', 'NEW', 'MID', 'UNSEEN'],
-    recentlySeen: [['OLD', 1000], ['NEW', 5000], ['MID', 3000]],
-    expected: ['NEW', 'MID', 'OLD', 'UNSEEN'],
-});
-
-// ============================================================================
 // getChangeClass 测试用例
 // 格式: { name, change, expected }
 // ============================================================================
@@ -1207,6 +1150,16 @@ extractionTests.push({ name: '法币：当金额单位不认', input: '账户里
 extractionTests.push({ name: '代码列表行：只有货币也认', input: 'USD CNY', expected: ['USD', 'CNY'] });
 extractionTests.push({ name: '单字母只认 $ 写法', input: 'A股 和 F 都不算，$F 算', expected: ['F'] });
 
+// ── 缩写（真机测试"光进铜退手册"术语表帖暴露的误报） ──
+
+extractionTests.push({ name: '缩写写了全称不认', input: 'OCS Optical Circuit Switch 光路交换机，NPO 光引擎（Near-Packaged Optics）', expected: [] });
+extractionTests.push({ name: '写了全称但同句有交易词仍认', input: 'AMD 股价大跌（Advanced Micro Devices）', expected: ['AMD'] });
+extractionTests.push({ name: '术语表：2–3 字母代码都当缩写，4 字母代码照常', input: 'DSP Digital Signal Processor\nOCS Optical Circuit Switch\nNPO Near Packaged Optics\nALC、COHR 都在做', expected: ['COHR'] });
+extractionTests.push({ name: '普通英文里的首字母巧合不算全称', input: 'and my dad 都在拿 AMD', expected: ['AMD'] });
+
+extractionTests.push({ name: '连字符复合词里的小写词不认', input: 'IMDD 与相干-lite 两条线，scale-up 方案', expected: [] });
+extractionTests.push({ name: '缩写只有少数几处有证据不认', input: 'DSP Digital Signal Processor\n3.6T 的 DSP 在 2029 年出现\n多家 DSP 来源\nMarvell 把 DSP 卖进别人的线缆', expected: [] });
+
 // ── 其他市场 ──
 
 extractionTests.push({ name: '交易所后缀：日/港/伦敦', input: '古河电工 5801.T、VOD.L 以及 0700.HK', expected: ['5801.T', 'VOD.L', '0700.HK'] });
@@ -1261,3 +1214,42 @@ acceptsFormTests.push({ name: '小写撞车词', code: 'COST', raw: 'cost', expe
 acceptsFormTests.push({ name: '大写撞车词', code: 'COST', raw: 'COST', expected: true });
 acceptsFormTests.push({ name: '小写但像英文词', code: 'UBER', raw: 'uber', expected: false });
 acceptsFormTests.push({ name: '公司名不限大小写', code: 'NIKE', raw: 'nike', expected: true });
+
+priceFormatTests.push({
+    name: '闭市但有盘后价（隔夜）— 显示C前缀和P价格',
+    symbol: 'TSLA',
+    priceData: { price: 343.69, change: -10.77, extPrice: 347.56, extChange: 1.13, tradingPeriod: postTp, _nowS: 80000 },
+    expected: '(C343.69 -10.77%) · P347.56 +1.13%',
+});
+
+// ============================================================================
+// parseQuoteMeta：Yahoo chart/spark 的 meta → 行情（字段取自 2026-11-06 的真实返回）
+// expected 只比较列出的字段；null 表示应返回 null
+// ============================================================================
+
+const quoteMetaTests = [];
+
+const metaTp = { pre: { start: 1, end: 2 }, regular: { start: 2, end: 3 }, post: { start: 3, end: 4 } };
+
+quoteMetaTests.push({
+    name: '常规价 + 盘后价（fulldayPrice）',
+    meta: { regularMarketPrice: 343.69, chartPreviousClose: 385.19, fulldayPrice: 347.56, hasPrePostMarketData: true, longName: 'Tesla, Inc.', currentTradingPeriod: metaTp },
+    expected: { name: 'Tesla, Inc.', price: 343.69, change: -10.77, extPrice: 347.56, extChange: 1.13 },
+});
+quoteMetaTests.push({
+    name: '没有盘前盘后数据的市场不显示 P',
+    meta: { regularMarketPrice: 1132000, chartPreviousClose: 1264000, fulldayPrice: 1132000, hasPrePostMarketData: false, shortName: 'SK hynix' },
+    expected: { name: 'SK hynix', price: 1132000, change: -10.44, extPrice: undefined },
+});
+quoteMetaTests.push({
+    name: 'fulldayPrice 与常规价相同不显示 P',
+    meta: { regularMarketPrice: 100, chartPreviousClose: 98, fulldayPrice: 100, hasPrePostMarketData: true },
+    expected: { price: 100, change: 2.04, extPrice: undefined },
+});
+quoteMetaTests.push({
+    name: '没有昨收时用 regularMarketChangePercent',
+    meta: { regularMarketPrice: 50, regularMarketChangePercent: -1.5 },
+    expected: { price: 50, change: -1.5 },
+});
+quoteMetaTests.push({ name: '没有价格 → null', meta: { symbol: 'X' }, expected: null });
+quoteMetaTests.push({ name: 'meta 缺失 → null', meta: undefined, expected: null });

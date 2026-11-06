@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         USCardForum Stock Price
 // @namespace    http://tampermonkey.net/
-// @version      0.5.0
+// @version      0.5.1
 // @description  Show stock prices inline on USCardForum investment category
 // @match        https://www.uscardforum.com/*
 // @grant        GM_xmlhttpRequest
@@ -142,6 +142,12 @@
     function acceptsForm(U, raw) {
         if (raw === U || NAME_ALIASES[U]) return true;
         return isStrongCode(U) && U.length >= 3 && !ENGLISH_WORDS.has(U);
+    }
+
+    // 文中这一处能不能当代码：写法对（acceptsForm），且小写/混写时不是连字符复合词的一部分（相干-lite、scale-up）
+    function acceptsOccurrence(U, raw, text, start, end) {
+        if (!acceptsForm(U, raw)) return false;
+        return raw === U || (text[start - 1] !== '-' && text[end] !== '-');
     }
 
     // ── 上下文证据 ──────────────────────────────────────────────────────────
@@ -388,6 +394,12 @@
         let anyStrong = out.size > 0;
 
         const pending = [];     // 需要证据、附近没找到的：最后看所在行
+        const acronymCache = new Map();
+        const acronymHits = new Map();   // 缩写 → { seen, hit }
+        // 术语表模式：给 ≥3 个"像代码的缩写"写了全称的楼，2–3 字母的代码都当缩写看
+        const definedCount = [...new Set(text.match(/(?<![A-Za-z0-9])[A-Z]{2,5}(?![A-Za-z0-9])/g) || [])]
+            .filter(U => isKnownCode(U) && isDefinedAcronym(U, text, acronymCache)).length;
+        const glossary = definedCount >= 3;
         for (const m of text.matchAll(RE_WORD)) {
             const start = m.index, raw = m[1], end = start + raw.length;
             const line = lineAt(start);
@@ -413,25 +425,47 @@
                 if (raw !== U) continue;
                 line.codes++;
                 if (RE_FX_CUE.test(nearText(text, start, end))) out.add(U);
-                else pending.push({ U, line });
+                else pending.push({ U, line, minor: false });
                 continue;
             }
-            if (!isKnownCode(U) || !acceptsForm(U, raw)) continue;
+            if (!isKnownCode(U)) continue;
+            // 文中写了全称（OCS Optical Circuit Switch、NPO = Near-Packaged Optics）→ 是缩写，降级为要证据
+            const acronym = isDefinedAcronym(U, text, acronymCache) || (glossary && U.length <= 3);
+            if (acronym ? raw !== U : !acceptsOccurrence(U, raw, text, start, end)) continue;
             line.codes++;
-            if (isStrongCode(U)) {
+            if (acronym) {                                 // 缩写：按出现次数算，至少 1/3 处有直接证据才认
+                const a = acronymHits.get(U) || { seen: 0, hit: 0 };
+                a.seen++;
+                if (hasEvidence(U, text, start, end, ctx)) a.hit++;
+                acronymHits.set(U, a);
+            } else if (isStrongCode(U)) {
                 out.add(U);
                 line.strong = anyStrong = true;
             } else if (raw === U) {
                 if (hasEvidence(U, text, start, end, ctx)) out.add(U);
-                else pending.push({ U, line });
+                else pending.push({ U, line, minor: !isPopularCode(U) });
             }
         }
-        // 同一行有确定代码；或这一行只有代码（≥2 个，或单独一个且本楼有别的确定代码）
-        for (const { U, line } of pending) {
+        for (const [U, a] of acronymHits) if (a.hit * 3 >= a.seen) out.add(U);
+        // 同一行有确定代码；或这一行只有代码（≥2 个；或单独一个、本楼有别的确定代码、且不是冷门代码/缩写）
+        for (const { U, line, minor } of pending) {
             const codeOnly = !line.prose && line.codes === line.words;
-            if (line.strong || (codeOnly && (line.words >= 2 || anyStrong))) out.add(U);
+            if (line.strong || (codeOnly && (line.words >= 2 || (anyStrong && !minor)))) out.add(U);
         }
         return [...out];
+    }
+
+    // 文中有没有一串连续英文词、首字母正好拼出 U（Digital Signal Processor → DSP）
+    function isDefinedAcronym(U, text, cache) {
+        if (cache.has(U)) return cache.get(U);
+        let found = false;
+        if (/^[A-Z]{2,5}$/.test(U)) {
+            // 每个词首字母大写（术语表的写法），避免 "and my dad" 这类普通英文误判 AMD
+            const re = new RegExp('(?<![A-Za-z])' + [...U].map(c => `${c}[A-Za-z]+`).join('[\\s\\-/]+') + '(?![A-Za-z])');
+            found = re.test(text);
+        }
+        cache.set(U, found);
+        return found;
     }
 
     // ── Yahoo 代码 / 行情 ───────────────────────────────────────────────────
@@ -479,17 +513,24 @@
         return (now - timestamp) >= ttl;
     }
 
-    function sortByRecentlySeen(symbols, recentlySeen) {
-        return [...symbols].sort((a, b) => (recentlySeen.get(b) || 0) - (recentlySeen.get(a) || 0));
-    }
-
-    // 按代码散列出 ±30s 的抖动，让各代码的缓存过期/刷新时间错开
-    function symbolJitter(symbol) {
-        let hash = 0;
-        for (let i = 0; i < symbol.length; i++) {
-            hash = ((hash << 5) - hash) + symbol.charCodeAt(i);
+    // Yahoo chart / spark 的 meta → 行情。查不到返回 null。
+    // 盘前盘后：meta.fulldayPrice 是含盘前盘后的最新价（hasPrePostMarketData 时有意义），涨跌相对常规收盘价。
+    function parseQuoteMeta(meta) {
+        if (meta?.regularMarketPrice == null) return null;
+        const price = meta.regularMarketPrice;
+        const prevClose = meta.chartPreviousClose ?? meta.previousClose;
+        const quote = {
+            name: meta.longName || meta.shortName || '',
+            price,
+            change: prevClose ? ((price - prevClose) / prevClose) * 100 : (meta.regularMarketChangePercent ?? 0),
+            tradingPeriod: meta.currentTradingPeriod,
+        };
+        const ext = meta.fulldayPrice;
+        if (meta.hasPrePostMarketData && ext != null && price && Math.abs(ext - price) >= 0.005) {
+            quote.extPrice = ext;
+            quote.extChange = ((ext - price) / price) * 100;
         }
-        return (Math.abs(hash) % 60001) - 30000;
+        return quote;
     }
 
     function getChangeClass(change) {
@@ -502,7 +543,7 @@
         return val >= 0 ? `+${val.toFixed(2)}` : val.toFixed(2);
     }
 
-    // 价格标签的 HTML：(C123.45 +1.23%)，盘前盘后追加 · P 价格
+    // 价格标签的 HTML：(C123.45 +1.23%)；常规时段以外有盘前盘后价时追加 · P 价格（涨跌相对常规收盘）
     function buildPriceContent(symbol, priceData, nowS) {
         if (FIAT_CODES.has(symbol)) {
             return `(1=${symbol}${priceData.price.toFixed(2)} ${formatChange(priceData.change)}%)`;
@@ -512,10 +553,9 @@
         const prefix = session === 'closed' ? 'C' : '';
         let html = `(${prefix}${priceData.price.toFixed(2)} ${formatChange(priceData.change)}%)`;
 
-        const afterPrice = session === 'post' ? priceData.postPrice : session === 'pre' ? priceData.prePrice : null;
-        const afterChange = session === 'post' ? priceData.postChange : session === 'pre' ? priceData.preChange : null;
-        if (afterPrice != null) {
-            html += `<span class="sp-after-hours ${getChangeClass(afterChange)}"> · P${afterPrice.toFixed(2)} ${formatChange(afterChange)}%</span>`;
+        if (session !== 'regular' && priceData.extPrice != null) {
+            const c = priceData.extChange;
+            html += `<span class="sp-after-hours ${getChangeClass(c)}"> · P${priceData.extPrice.toFixed(2)} ${formatChange(c)}%</span>`;
         }
         return html;
     }
@@ -866,23 +906,45 @@
 
     // ═══════════════════════════════════════════════════════════════════════
     // 一次「理财页会话」：进入理财分类时 init()，离开时 stop()。
-    // 行情缓存、请求队列等状态都在 init() 里，每次进入重新开始。
+    // 行情、请求队列等状态都在 init() 里，每次进入重新开始。
     // ═══════════════════════════════════════════════════════════════════════
-    const CACHE_TTL = 60000;          // 行情缓存 60s（± symbolJitter）
-    const REFRESH_INTERVAL = 60000;   // 每个代码 60s 刷新一次（± symbolJitter）
-    const REFRESH_MAX = 20;           // 每轮最多刷新最近看到的 20 个
-    const BATCH_SIZE = 30;            // 每批并发请求数
-    const BATCH_INTERVAL = 5000;      // 批与批之间的间隔
+    const SPARK_MAX = 20;             // Yahoo spark 接口一次最多 20 个代码
+    const REQUEST_GAP = 1000;         // 两次请求之间至少隔 1s；同一时间只有一个请求在途
+    const BACKOFF_START = 5000;       // 429 / 网络错误后的重试间隔：5s 起翻倍，最长 2 分钟
+    const BACKOFF_MAX = 120000;
+    const REFRESH_INTERVAL = 60000;   // 页面上的代码每分钟刷新一次（整批请求）
+    const CLOSED_REFRESH = 30 * 60000; // 闭市的代码 30 分钟才刷新一次
     const POLL_INTERVAL = 1000;       // SPA 跳转检测间隔
 
     let initialized = false;
     let observer = null;
     let refreshTimer = null;
+    let onVisible = null;
 
     function stop() {
         if (observer) { observer.disconnect(); observer = null; }
         if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+        if (onVisible) { document.removeEventListener('visibilitychange', onVisible); onVisible = null; }
         initialized = false;
+    }
+
+    // GM_xmlhttpRequest → Promise<{ status, data }>；网络错误/超时 status 为 0
+    function gmGetJson(url, timeout = 8000) {
+        return new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url,
+                responseType: 'json',
+                timeout,
+                onload(r) {
+                    let data = r.response;
+                    if (typeof data === 'string') { try { data = JSON.parse(data); } catch (e) { data = null; } }
+                    resolve({ status: r.status, data });
+                },
+                onerror() { resolve({ status: 0, data: null }); },
+                ontimeout() { resolve({ status: 0, data: null }); },
+            });
+        });
     }
 
     function init() {
@@ -908,179 +970,136 @@
         if (loads.length) Promise.all(loads).then(() => { processedPosts = new WeakSet(); processNewPosts(); });
 
         // ── 会话状态 ──
-        const priceCache = new Map();      // symbol → { data, timestamp }，带 TTL
-        const pagePriceMap = new Map();    // symbol → data，本页已拿到的行情
-        const deadSymbols = new Set();     // 查不到行情的代码，本次会话不再请求
-        const recentlySeen = new Map();    // symbol → 最后一次在页面上看到的时间，决定刷新优先级
-        const lastRefresh = new Map();     // symbol → 上次刷新时间
+        const quotes = new Map();          // 论坛写法 → 行情（parseQuoteMeta 的结果 + yahooSymbol + fetchedAt）
+        const deadSymbols = new Set();     // 所有候选市场都查不到的代码，本次会话不再请求
         let processedPosts = new WeakSet();
 
-        // ── 请求队列：去重、分批、批间延时；429/网络错误本批丢弃，等下次扫描再排 ──
-        const symbolFetchQueue = [];
-        const pendingFetches = new Set();  // 正在请求中的代码
-        const queueCallbacks = [];
-        let queueDraining = false;
+        // ── 行情队列 ──
+        // 按 Yahoo 代码去重（NVDA 和"英伟达"只请求一次），每批 ≤ 20 个用 spark 接口一次查完；
+        // 某个代码没返回 → 换下一个候选市场重新排队；429 / 网络错误 → 整批放回、指数退避重试。
+        const candidateIndex = new Map();  // 论坛写法 → 正在试第几个候选
+        const waiting = new Map();         // Yahoo 代码 → Set(论坛写法)
+        const queue = new Set();           // 待请求的 Yahoo 代码
+        const pending = new Set();         // 已在队列或请求中的论坛写法（不重复排队）
+        let inFlight = false;
+        let flushTimer = null;
+        let backoff = 0;
+        let sparkBroken = false;           // spark 接口不可用时退回到逐个请求 chart
+        let lastRefreshAt = 0;
 
         // 调试统计
-        let lastRequestTime = 0;
-        let requestCount = 0;
-        const requestLog = [];             // { time, symbol, status, duration, gap, queueLen }，最多 200 条
+        const requestLog = [];             // { time, symbols, status, ms }，最多 200 条
 
-        function enqueueSymbols(symbols, onBatch, force) {
-            const deduped = symbols.filter(s =>
-                !symbolFetchQueue.includes(s) &&
-                !pendingFetches.has(s) &&
-                !deadSymbols.has(s) &&
-                (force || !pagePriceMap.has(s))
-            );
-            if (deduped.length === 0) return;
-            symbolFetchQueue.push(...deduped);
-            if (onBatch) queueCallbacks.push(onBatch);
-            if (!queueDraining) drainFetchQueue();
+        function currentYahoo(symbol) {
+            return yahooCandidates(symbol)[candidateIndex.get(symbol) || 0];
         }
 
-        async function drainFetchQueue() {
-            queueDraining = true;
-            let firstBatch = true;
-            while (symbolFetchQueue.length > 0) {
-                if (!firstBatch) {
-                    log('queue delay', BATCH_INTERVAL, 'ms');
-                    await new Promise(r => setTimeout(r, BATCH_INTERVAL));
-                }
-                firstBatch = false;
-                const batch = symbolFetchQueue.splice(0, BATCH_SIZE);
-                log('queue batch', batch.join(','));
-                batch.forEach(s => pendingFetches.add(s));
-                const results = await Promise.all(batch.map(fetchPrice));
-                const fetched = [];
-                batch.forEach((symbol, i) => {
-                    const result = results[i];
-                    pendingFetches.delete(symbol);
-                    if (result?._retry) return;
-                    if (result) {
-                        priceCache.set(symbol, { data: result, timestamp: Date.now() });
-                        pagePriceMap.set(symbol, result);
-                        fetched.push(result);
-                    } else {
-                        deadSymbols.add(symbol);
-                    }
-                });
-                for (const r of fetched) updateSymbolSpans(r.symbol, r);
-                for (const cb of queueCallbacks) {
-                    try { cb(pagePriceMap); } catch (e) { /* 回调出错不影响队列 */ }
-                }
+        function want(symbols) {
+            for (const s of symbols) {
+                if (deadSymbols.has(s) || pending.has(s)) continue;
+                const y = currentYahoo(s);
+                if (!y) continue;
+                pending.add(s);
+                if (!waiting.has(y)) waiting.set(y, new Set());
+                waiting.get(y).add(s);
+                queue.add(y);
             }
-            queueDraining = false;
-            queueCallbacks.length = 0;
+            scheduleFlush(0);
         }
 
-        // 返回行情对象；查不到返回 null；需要以后重试返回 { _retry: true }。
-        // 纯数字代码可能有多个候选市场（600377 → .SS / .SZ / .KS …），依次尝试。
-        async function fetchPrice(symbol) {
-            for (const yahooSymbol of yahooCandidates(symbol)) {
-                const r = await fetchQuote(symbol, yahooSymbol);
-                if (r !== null) return r;
+        function scheduleFlush(delay) {
+            if (flushTimer || inFlight || queue.size === 0) return;
+            flushTimer = setTimeout(flush, delay);
+        }
+
+        async function flush() {
+            flushTimer = null;
+            const batch = [...queue].slice(0, SPARK_MAX);
+            if (batch.length === 0) return;
+            batch.forEach(y => queue.delete(y));
+            inFlight = true;
+            const { retry, metas } = await fetchBatch(batch);
+            inFlight = false;
+
+            if (retry) {
+                batch.forEach(y => queue.add(y));
+                backoff = Math.min(backoff ? backoff * 2 : BACKOFF_START, BACKOFF_MAX);
+                console.log(`[stock-price] ⚠ Yahoo 请求失败，${backoff / 1000}s 后重试 ${batch.length} 个代码`);
+                scheduleFlush(backoff);
+                return;
             }
-            return null;
-        }
+            backoff = 0;
 
-        function fetchQuote(symbol, yahooSymbol) {
-            return new Promise((resolve) => {
-                const startTime = Date.now();
-                GM_xmlhttpRequest({
-                    method: 'GET',
-                    url: `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?range=1d&interval=1d&includePrePost=true`,
-                    responseType: 'json',
-                    timeout: 5000,
-                    onload(response) {
-                        const duration = Date.now() - startTime;
-                        const gap = startTime - lastRequestTime;
-                        lastRequestTime = startTime;
-                        requestCount++;
-                        requestLog.push({ time: new Date().toISOString(), symbol, status: response.status, duration, gap, queueLen: pendingFetches.size });
-                        if (requestLog.length > 200) requestLog.shift();
-
-                        if (response.status === 429) {
-                            console.log('[stock-price] ⚠ rate limited, retry later:', yahooSymbol);
-                            resolve({ _retry: true });
-                            return;
-                        }
-                        if (response.status === 404) {
-                            console.log('[stock-price] ✗ 404 not found:', yahooSymbol);
-                            resolve(null);
-                            return;
-                        }
-                        log(`✓ ${symbol} ${response.status} ${duration}ms (gap=${gap}ms, queue=${pendingFetches.size}, total=#${requestCount})`);
-                        try {
-                            const data = typeof response.response === 'string'
-                                ? JSON.parse(response.response)
-                                : response.response;
-                            const result = parseChartMeta(symbol, data?.chart?.result?.[0]?.meta);
-                            if (result) result.yahooSymbol = yahooSymbol;
-                            resolve(result);
-                        } catch (e) {
-                            resolve(null);
-                        }
-                    },
-                    onerror() { resolve({ _retry: true }); },
-                    ontimeout() { resolve({ _retry: true }); },
-                });
-            });
-        }
-
-        function parseChartMeta(symbol, meta) {
-            log('fetchPrice', symbol, 'meta:', meta ? 'regularMarketPrice=' + meta.regularMarketPrice + ' tradingPeriod=' + JSON.stringify(meta.currentTradingPeriod?.regular) : 'null');
-            if (meta?.regularMarketPrice == null) return null;
-            const price = meta.regularMarketPrice;
-            const prevClose = meta.chartPreviousClose ?? meta.previousClose;
-            const result = {
-                symbol,
-                name: meta.longName || meta.shortName || '',
-                price,
-                change: prevClose ? ((price - prevClose) / prevClose) * 100 : (meta.regularMarketChangePercent ?? 0),
-                tradingPeriod: meta.currentTradingPeriod,
-            };
-            if (meta.postMarketPrice != null) {
-                result.postPrice = meta.postMarketPrice;
-                result.postChange = meta.postMarketChangePercent ?? (prevClose ? ((meta.postMarketPrice - price) / price) * 100 : 0);
-            }
-            if (meta.preMarketPrice != null) {
-                result.prePrice = meta.preMarketPrice;
-                result.preChange = meta.preMarketChangePercent ?? (prevClose ? ((meta.preMarketPrice - prevClose) / prevClose) * 100 : 0);
-            }
-            return result;
-        }
-
-        // 缓存命中的立即回调；其余进队列，每批完成后回调 onBatch(pagePriceMap)
-        function fetchPrices(symbols, onBatch) {
-            const priceMap = new Map();
-            const retrySymbols = new Set();
+            const updated = [];
             const now = Date.now();
-            const toFetch = [];
-
-            for (const symbol of symbols) {
-                if (pendingFetches.has(symbol)) continue;
-                const cached = priceCache.get(symbol);
-                if (cached && !isCacheExpired(cached.timestamp, now, CACHE_TTL + symbolJitter(symbol))) {
-                    priceMap.set(symbol, cached.data);
-                } else {
-                    toFetch.push(symbol);
+            for (const y of batch) {
+                const symbols = waiting.get(y) || new Set();
+                waiting.delete(y);
+                const quote = parseQuoteMeta(metas.get(y));
+                for (const s of symbols) {
+                    pending.delete(s);
+                    if (quote) {
+                        quotes.set(s, { ...quote, yahooSymbol: y, fetchedAt: now });
+                        updated.push(s);
+                    } else if ((candidateIndex.get(s) || 0) + 1 < yahooCandidates(s).length) {
+                        candidateIndex.set(s, (candidateIndex.get(s) || 0) + 1);   // 换下一个候选市场
+                        want([s]);
+                    } else if (!quotes.has(s)) {
+                        deadSymbols.add(s);
+                        log('not found', s, yahooCandidates(s).join('|'));
+                    }
                 }
             }
+            if (updated.length) onQuotes(updated);
+            scheduleFlush(REQUEST_GAP);
+        }
 
-            if (onBatch && priceMap.size > 0) onBatch(priceMap);
-            if (toFetch.length === 0) return { priceMap, retrySymbols };
-
-            enqueueSymbols(toFetch, onBatch);
-
-            for (const symbol of toFetch) {
-                if (pagePriceMap.has(symbol)) {
-                    priceMap.set(symbol, pagePriceMap.get(symbol));
-                } else if (!deadSymbols.has(symbol)) {
-                    retrySymbols.add(symbol);
+        // 请求一批 Yahoo 代码 → { retry, metas: Map(Yahoo 代码 → meta) }；没返回的代码不在 metas 里
+        async function fetchBatch(batch) {
+            const metas = new Map();
+            const t0 = Date.now();
+            if (!sparkBroken) {
+                const url = 'https://query1.finance.yahoo.com/v7/finance/spark?range=1d&interval=1d&symbols=' +
+                    batch.map(encodeURIComponent).join(',');
+                const r = await gmGetJson(url);
+                logRequest(batch, r.status, t0);
+                if (r.status === 429 || r.status === 0 || r.status >= 500) return { retry: true, metas };
+                const results = r.data?.spark?.result;
+                if (r.status === 200 && Array.isArray(results)) {
+                    for (const x of results) {
+                        const meta = x?.response?.[0]?.meta;
+                        if (x?.symbol && meta) metas.set(x.symbol, meta);
+                    }
+                    return { retry: false, metas };
                 }
+                console.log('[stock-price] spark 接口不可用（HTTP ' + r.status + '），改用逐个请求');
+                sparkBroken = true;
             }
-            return { priceMap, retrySymbols };
+            // 退路：chart 接口逐个请求（串行，避免并发打爆）
+            for (const y of batch) {
+                const t1 = Date.now();
+                const r = await gmGetJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(y)}?range=1d&interval=1d`);
+                logRequest([y], r.status, t1);
+                if (r.status === 429 || r.status === 0 || r.status >= 500) return { retry: true, metas: new Map() };
+                const meta = r.data?.chart?.result?.[0]?.meta;
+                if (meta) metas.set(y, meta);
+            }
+            return { retry: false, metas };
+        }
+
+        function logRequest(symbols, status, t0) {
+            requestLog.push({ time: new Date(t0).toISOString(), symbols: symbols.join(','), status, ms: Date.now() - t0 });
+            if (requestLog.length > 200) requestLog.shift();
+            log(`Yahoo ${status} ${Date.now() - t0}ms [${symbols.length}] ${symbols.join(',')}`);
+        }
+
+        // 新行情到了：更新已有标签，替换还没处理的文字，再扫一遍 DOM（Discourse 可能已重建 .cooked）
+        function onQuotes(symbols) {
+            for (const s of symbols) updateSymbolSpans(s, quotes.get(s));
+            for (const el of document.querySelectorAll('.fancy-title, .topic-post .cooked')) {
+                replaceInContainer(el, quotes, el.classList.contains('fancy-title'));
+            }
+            requestAnimationFrame(processNewPosts);
         }
 
         // ── DOM：价格标签 ──
@@ -1173,7 +1192,8 @@
                 const matches = [...text.matchAll(regex)].filter(m => {
                     const raw = m[1] || m[2];
                     const symbol = raw.toUpperCase();
-                    return allowed.has(symbol) && !inZones(m.index, phraseZones) && (m[1] || acceptsForm(symbol, raw));
+                    return allowed.has(symbol) && !inZones(m.index, phraseZones) &&
+                        (m[1] || acceptsOccurrence(symbol, raw, text, m.index, m.index + m[0].length));
                 });
                 if (matches.length === 0) continue;
 
@@ -1207,7 +1227,7 @@
                 if (!processedPosts.has(el)) newContainers.push({ el, isTitle: false });
             }
             if (newContainers.length === 0) return;
-            log('processNewPosts:', newContainers.length, 'new containers, pagePriceMap size:', pagePriceMap.size);
+            log('processNewPosts:', newContainers.length, 'new containers, quotes:', quotes.size);
 
             // 先收集本帖线索（标题、各楼的 $X），再逐个容器提取代码
             const ctx = threadContext();
@@ -1216,68 +1236,34 @@
                 if (isTitle) titleCodes(texts.get(el)).forEach(c => ctx.title.add(c));
                 collectExactCodes(texts.get(el)).forEach(c => ctx.dollar.add(c));
             }
-            const newCodes = new Set();
-            const now = Date.now();
-            for (const { el } of newContainers) {
+            const missing = new Set();
+            for (const { el, isTitle } of newContainers) {
                 const codes = extractStockCodes(texts.get(el), ctx);
                 containerCodes.set(el, new Set(codes));
-                for (const code of codes) {
-                    recentlySeen.set(code, now);
-                    if (!pagePriceMap.has(code) && !deadSymbols.has(code) && !pendingFetches.has(code)) {
-                        newCodes.add(code);
-                    }
-                }
-            }
-
-            // 已有行情的代码立即替换
-            for (const { el, isTitle } of newContainers) {
-                replaceInContainer(el, pagePriceMap, isTitle);
-                // 真的替换过才标记为已处理，否则等拿到行情后再处理
+                codes.filter(c => !quotes.has(c) && !deadSymbols.has(c)).forEach(c => missing.add(c));
+                // 已有行情的立即替换；真的替换过才标记为已处理，否则等行情到了再处理
+                replaceInContainer(el, quotes, isTitle);
                 if (el.querySelector('.sp-stock-link, .sp-stock-title')) processedPosts.add(el);
             }
-
-            if (newCodes.size === 0) return;
-
-            const codesToFetch = [...newCodes];
-            const { priceMap, retrySymbols } = fetchPrices(codesToFetch, (batchMap) => {
-                for (const [symbol, data] of batchMap) pagePriceMap.set(symbol, data);
-                // 先更新当初抓到的容器（可能已被 Discourse 换掉）
-                for (const { el, isTitle } of newContainers) replaceInContainer(el, pagePriceMap, isTitle);
-                // 再扫一遍现有 DOM：请求期间 .cooked 可能被重建（从下往上滚时常见）
-                requestAnimationFrame(processNewPosts);
-            });
-            for (const code of codesToFetch) {
-                if (!priceMap.has(code) && !retrySymbols.has(code)) {
-                    deadSymbols.add(code);
-                    log('processNewPosts: marking dead', code);
-                }
-            }
+            if (missing.size) want([...missing]);
         }
 
-        // ── 定时刷新：最近看到的优先，闭市的跳过 ──
+        // ── 定时刷新：只刷页面上正在显示的代码；闭市的半小时一次；标签页在后台时暂停 ──
 
         function refreshPrices() {
-            if (!isInvestmentCategory()) return;
-            const now = Date.now();
-            const nowS = now / 1000;
-            const candidates = sortByRecentlySeen(
-                [...pagePriceMap.keys()].filter(s => !deadSymbols.has(s) && recentlySeen.has(s)),
-                recentlySeen
-            );
-            const toRefresh = candidates.filter(s => {
-                if (now - (lastRefresh.get(s) || 0) < REFRESH_INTERVAL + symbolJitter(s)) return false;
-                // 最近 4 小时内有交易时段的数据，且现在闭市 → 不用刷
-                const tp = pagePriceMap.get(s)?.tradingPeriod;
-                if (tp?.regular && tp.regular.end > nowS - 14400 && getMarketSession(tp, nowS) === 'closed') {
-                    return false;
-                }
-                return true;
-            }).slice(0, REFRESH_MAX);
-
-            if (toRefresh.length === 0) return;
-            log('refreshing', toRefresh.length, 'symbols:', toRefresh.join(','));
-            toRefresh.forEach(s => lastRefresh.set(s, now));
-            enqueueSymbols(toRefresh, null, true);
+            if (document.hidden || !isInvestmentCategory()) return;
+            lastRefreshAt = Date.now();
+            const shown = new Set([...document.querySelectorAll('.sp-stock-price[data-sp-symbol]')].map(e => e.dataset.spSymbol));
+            const due = [...shown].filter(s => {
+                const q = quotes.get(s);
+                if (!q) return false;
+                const closed = getMarketSession(q.tradingPeriod) === 'closed';
+                return !closed || isCacheExpired(q.fetchedAt, lastRefreshAt, CLOSED_REFRESH);
+            });
+            if (due.length) {
+                log('refreshing', due.length, 'symbols');
+                want(due);
+            }
         }
 
         // ── 启动 ──
@@ -1297,24 +1283,20 @@
         observer.observe(document.body, { childList: true, subtree: true });
 
         refreshTimer = setInterval(refreshPrices, REFRESH_INTERVAL);
+        onVisible = () => {
+            if (!document.hidden && Date.now() - lastRefreshAt >= REFRESH_INTERVAL) refreshPrices();
+        };
+        document.addEventListener('visibilitychange', onVisible);
 
-        // 控制台调试：__stockPriceDebug.stats() / .recent() / .symbols() / .getLog()
+        // 控制台调试：__stockPriceDebug.stats() / .recent() / .symbols()
         window.__stockPriceDebug = {
-            getLog: () => requestLog,
             recent: (n = 20) => requestLog.slice(-n),
-            symbols: () => ({ pagePriceMap: [...pagePriceMap.keys()], deadSymbols: [...deadSymbols], pending: [...pendingFetches] }),
+            symbols: () => ({ quotes: [...quotes.keys()], dead: [...deadSymbols], pending: [...pending], backoff }),
             stats() {
-                if (requestLog.length === 0) return 'No requests yet';
                 const byStatus = {};
-                const gaps = [];
-                for (const e of requestLog) {
-                    byStatus[e.status] = (byStatus[e.status] || 0) + 1;
-                    if (e.gap > 0) gaps.push(e.gap);
-                }
-                const avgGap = gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length) : 0;
-                const minGap = gaps.length ? Math.min(...gaps) : Infinity;
-                const maxGap = gaps.length ? Math.max(...gaps) : 0;
-                return `Total: ${requestLog.length}, Rate limited: ${byStatus[429] || 0}, Avg gap: ${avgGap}ms, Min gap: ${minGap}ms, Max gap: ${maxGap}ms, Status: ${JSON.stringify(byStatus)}`;
+                for (const e of requestLog) byStatus[e.status] = (byStatus[e.status] || 0) + 1;
+                const n = requestLog.reduce((a, e) => a + e.symbols.split(',').length, 0);
+                return `requests ${requestLog.length} (symbols ${n}), status ${JSON.stringify(byStatus)}, spark ${sparkBroken ? 'off' : 'on'}`;
             },
         };
     }
