@@ -114,9 +114,10 @@ extractionTests.push({
 });
 
 extractionTests.push({
-    name: 'update: 冒号后缀不提取（其余独立词照常）',
+    // 含语法词 THE → 整段判为英文句子，只认 $EXACT，所以什么都不提取
+    name: 'update: 冒号后缀不提取（含 the 的英文句子整体跳过）',
     input: 'update: fixed the bug',
-    expected: ['FIXED'],
+    expected: [],
 });
 
 extractionTests.push({
