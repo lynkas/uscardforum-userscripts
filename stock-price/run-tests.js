@@ -16,7 +16,7 @@ if (!coreM) throw new Error('Cannot find "#region core" block in script');
 const CORE_EXPORTS = [
     'applyRemoteData', 'applyTickerData', 'stripJsonc', 'stripUrls',
     'extractStockCodes', 'emptyContext', 'titleCodes', 'collectExactCodes',
-    'resolveYahooSymbol', 'yahooCandidates', 'getMarketSession', 'isCacheExpired', 'sortByRecentlySeen',
+    'resolveYahooSymbol', 'yahooCandidates', 'getMarketSession', 'isCacheExpired', 'parseQuoteMeta',
     'getChangeClass', 'buildPriceContent', 'acceptsForm',
 ];
 const core = new Function(`'use strict';\n${coreM[1]}\nreturn { ${CORE_EXPORTS.join(', ')} };`)();
@@ -63,8 +63,14 @@ const SUITES = [
     ['formatPriceText', T.priceFormatTests, t => [
         core.buildPriceContent(t.symbol, t.priceData, t.priceData._nowS).replace(/<[^>]+>/g, ''), t.expected]],
     ['isCacheExpired', T.cacheExpiryTests, t => [core.isCacheExpired(t.timestamp, t.now, t.ttl), t.expected]],
-    ['sortByRecentlySeen', T.recentlySeenSortTests, t => [
-        core.sortByRecentlySeen(t.symbols, new Map(t.recentlySeen)), t.expected]],
+    // 只比较 expected 里列出的字段（涨跌幅保留两位小数）
+    ['parseQuoteMeta', T.quoteMetaTests, t => {
+        const q = core.parseQuoteMeta(t.meta);
+        if (t.expected === null || q === null) return [q, t.expected];
+        const pick = {};
+        for (const k of Object.keys(t.expected)) pick[k] = typeof q[k] === 'number' ? Math.round(q[k] * 100) / 100 : q[k];
+        return [JSON.stringify(pick), JSON.stringify(t.expected)];
+    }],
     ['getChangeClass', T.changeClassTests, t => [core.getChangeClass(t.change), t.expected]],
 ];
 
